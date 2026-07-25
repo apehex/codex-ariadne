@@ -497,7 +497,11 @@ fn summarize_json(value: &Value) -> String {
     let mut summary =
         serde_json::to_string(value).unwrap_or_else(|_| "<unserializable json>".to_string());
     if summary.len() > MAX_JSON_SUMMARY_LEN {
-        summary.truncate(MAX_JSON_SUMMARY_LEN);
+        let mut truncate_at = MAX_JSON_SUMMARY_LEN;
+        while !summary.is_char_boundary(truncate_at) {
+            truncate_at -= 1;
+        }
+        summary.truncate(truncate_at);
         summary.push_str("...");
     }
     summary
@@ -509,3 +513,7 @@ fn u64_field(value: &Value, field: &str) -> Option<u64> {
         .and_then(Value::as_i64)
         .map(|value| value.max(0) as u64)
 }
+
+#[cfg(test)]
+#[path = "normalize_tests.rs"]
+mod tests;

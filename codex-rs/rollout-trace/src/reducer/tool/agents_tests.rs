@@ -3,6 +3,8 @@ use serde_json::json;
 use tempfile::TempDir;
 
 use crate::model::AgentOrigin;
+use crate::model::ConversationBody;
+use crate::model::ConversationPart;
 use crate::model::ExecutionStatus;
 use crate::model::InteractionEdgeKind;
 use crate::model::RolloutStatus;
@@ -133,6 +135,11 @@ fn spawn_runtime_payload_targets_delivered_child_message() -> anyhow::Result<()>
         replayed.conversation_items[target_item_id].thread_id,
         "019d0000-0000-7000-8000-000000000002"
     );
+    let spawn_prompt_payload = &replayed.raw_payloads[&spawn_payloads.begin.raw_payload_id];
+    let spawn_prompt: serde_json::Value = serde_json::from_slice(&std::fs::read(
+        temp.path().join(&spawn_prompt_payload.path),
+    )?)?;
+    assert_eq!(spawn_prompt["prompt"], json!("count"));
     assert_eq!(
         edge.carried_raw_payload_ids,
         vec![
@@ -552,12 +559,169 @@ fn followup_activity_targets_delivered_child_message() -> anyhow::Result<()> {
         replayed.conversation_items[target_item_id].thread_id,
         child_thread_id
     );
+    let followup_invocation_payload = &replayed.raw_payloads[&invocation_payload.raw_payload_id];
+    let followup_invocation: serde_json::Value = serde_json::from_slice(&std::fs::read(
+        temp.path().join(&followup_invocation_payload.path),
+    )?)?;
+    let followup_arguments = followup_invocation["payload"]["arguments"]
+        .as_str()
+        .expect("follow-up invocation arguments");
+    let followup_arguments: serde_json::Value = serde_json::from_str(followup_arguments)?;
+    assert_eq!(followup_arguments["message"], json!("continue"));
     assert_eq!(
         edge.carried_raw_payload_ids,
         vec![
             invocation_payload.raw_payload_id,
             activity_payload.raw_payload_id,
         ]
+    );
+
+    Ok(())
+}
+
+#[test]
+fn raw_agent_payloads_preserve_plaintext_when_child_messages_are_opaque() -> anyhow::Result<()> {
+    let temp = TempDir::new()?;
+    let writer = create_started_agent_writer(&temp)?;
+    start_agent_turn(&writer, "turn-1")?;
+    let child_thread_id = "019d0000-0000-7000-8000-000000000002";
+    let spawn_payloads = append_spawn_agent_tool_lifecycle(&writer, "turn-1")?;
+
+    start_thread(&writer, child_thread_id, "/root/repo_file_counter")?;
+    start_turn_for_thread(&writer, child_thread_id, "turn-child-1")?;
+    let spawn_ciphertext = json!({
+        "type": "agent_message",
+        "author": "/root",
+        "recipient": "/root/repo_file_counter",
+        "content": [{
+            "type": "encrypted_content",
+            "encrypted_content": "ciphertext-spawn"
+        }]
+    });
+    append_inference_request(
+        &writer,
+        child_thread_id,
+        "turn-child-1",
+        "inference-child-1",
+        vec![spawn_ciphertext.clone()],
+    )?;
+
+    start_agent_turn(&writer, "turn-2")?;
+    let followup_invocation = writer.write_json_payload(
+        RawPayloadKind::ToolInvocation,
+        &json!({
+            "tool_name": "followup_task",
+            "payload": {
+                "type": "function",
+                "arguments": "{\"target\":\"/root/repo_file_counter\",\"message\":\"continue\"}"
+            }
+        }),
+    )?;
+    writer.append_with_context(
+        trace_context_for_agent("turn-2"),
+        RawTraceEventPayload::ToolCallStarted {
+            tool_call_id: "call-followup-opaque".to_string(),
+            model_visible_call_id: Some("call-followup-opaque".to_string()),
+            code_mode_runtime_tool_id: None,
+            requester: RawToolCallRequester::Model,
+            kind: ToolCallKind::AssignAgentTask,
+            summary: ToolCallSummary::Generic {
+                label: "followup_task".to_string(),
+                input_preview: None,
+                output_preview: None,
+            },
+            invocation_payload: Some(followup_invocation.clone()),
+        },
+    )?;
+    let followup_activity = writer.write_json_payload(
+        RawPayloadKind::ToolRuntimeEvent,
+        &json!({
+            "event_id": "call-followup-opaque",
+            "occurred_at_ms": 1234,
+            "agent_thread_id": child_thread_id,
+            "agent_path": "/root/repo_file_counter",
+            "kind": "interacted"
+        }),
+    )?;
+    writer.append_with_context(
+        trace_context_for_agent("turn-2"),
+        RawTraceEventPayload::ToolCallRuntimeEnded {
+            tool_call_id: "call-followup-opaque".to_string(),
+            status: ExecutionStatus::Completed,
+            runtime_payload: followup_activity,
+        },
+    )?;
+
+    start_turn_for_thread(&writer, child_thread_id, "turn-child-2")?;
+    let followup_ciphertext = json!({
+        "type": "agent_message",
+        "author": "/root",
+        "recipient": "/root/repo_file_counter",
+        "content": [{
+            "type": "encrypted_content",
+            "encrypted_content": "ciphertext-followup"
+        }]
+    });
+    append_inference_request(
+        &writer,
+        child_thread_id,
+        "turn-child-2",
+        "inference-child-2",
+        vec![spawn_ciphertext, followup_ciphertext],
+    )?;
+
+    let replayed = replay_bundle(temp.path())?;
+    let child_item_ids = &replayed.threads[child_thread_id].conversation_item_ids;
+    assert_eq!(
+        child_item_ids
+            .iter()
+            .map(|item_id| replayed.conversation_items[item_id].body.clone())
+            .collect::<Vec<_>>(),
+        vec![
+            ConversationBody {
+                parts: vec![ConversationPart::Encoded {
+                    label: "encrypted_content".to_string(),
+                    value: "ciphertext-spawn".to_string(),
+                }],
+            },
+            ConversationBody {
+                parts: vec![ConversationPart::Encoded {
+                    label: "encrypted_content".to_string(),
+                    value: "ciphertext-followup".to_string(),
+                }],
+            },
+        ],
+    );
+
+    let spawn_prompt_payload = &replayed.raw_payloads[&spawn_payloads.begin.raw_payload_id];
+    let spawn_prompt: serde_json::Value = serde_json::from_slice(&std::fs::read(
+        temp.path().join(&spawn_prompt_payload.path),
+    )?)?;
+    assert_eq!(spawn_prompt["prompt"], json!("count"));
+
+    let followup_payload = &replayed.raw_payloads[&followup_invocation.raw_payload_id];
+    let followup_invocation: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(temp.path().join(&followup_payload.path))?)?;
+    let followup_arguments = followup_invocation["payload"]["arguments"]
+        .as_str()
+        .expect("follow-up invocation arguments");
+    let followup_arguments: serde_json::Value = serde_json::from_str(followup_arguments)?;
+    assert_eq!(followup_arguments["message"], json!("continue"));
+
+    let spawn_edge = &replayed.interaction_edges["edge:spawn:019d0000-0000-7000-8000-000000000001:019d0000-0000-7000-8000-000000000002"];
+    assert_eq!(
+        spawn_edge.target,
+        TraceAnchor::Thread {
+            thread_id: child_thread_id.to_string(),
+        },
+    );
+    assert!(spawn_edge.carried_item_ids.is_empty());
+    assert!(
+        !replayed
+            .interaction_edges
+            .contains_key("edge:tool:call-followup-opaque"),
+        "opaque child content cannot be causally matched to a plaintext follow-up without a \
+         stable correlation id"
     );
 
     Ok(())

@@ -12,10 +12,10 @@ use anyhow::Result;
 use anyhow::bail;
 use serde_json::Value;
 
-use crate::bundle::MANIFEST_FILE_NAME;
 use crate::bundle::RAW_EVENT_LOG_FILE_NAME;
 use crate::bundle::REDUCED_TRACE_SCHEMA_VERSION;
 use crate::bundle::TraceBundleManifest;
+use crate::bundle::read_bundle_manifest;
 use crate::model::ExecutionStatus;
 use crate::model::RolloutTrace;
 use crate::payload::RawPayloadRef;
@@ -40,30 +40,45 @@ use self::tool::ObservedAgentResultEdge;
 use self::tool::PendingAgentInteractionEdge;
 use self::tool::ToolCallStarted;
 
+/// Best-effort replay result for diagnostic viewers.
+#[derive(Debug)]
+pub struct ResilientReplay {
+    pub trace: RolloutTrace,
+    pub diagnostics: Vec<ReplayDiagnostic>,
+    /// False when an event was skipped or failed reduction.
+    pub semantically_complete: bool,
+}
+
+/// Resource limits for best-effort diagnostic replay.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ReplayLimits {
+    /// Maximum non-empty events applied from one spine.
+    pub max_events: usize,
+    /// Maximum encoded bytes retained for one event line.
+    pub max_event_bytes: usize,
+}
+
+impl Default for ReplayLimits {
+    fn default() -> Self {
+        Self {
+            max_events: 100_000,
+            max_event_bytes: 1024 * 1024,
+        }
+    }
+}
+
+/// One malformed or inconsistent event skipped by resilient replay.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReplayDiagnostic {
+    pub line: Option<usize>,
+    pub message: String,
+}
+
 /// Replays a local trace bundle into a reduced rollout graph.
 pub fn replay_bundle(bundle_dir: impl AsRef<Path>) -> Result<RolloutTrace> {
     let bundle_dir = bundle_dir.as_ref();
-    let manifest: TraceBundleManifest =
-        serde_json::from_reader(File::open(bundle_dir.join(MANIFEST_FILE_NAME))?)
-            .with_context(|| format!("read {}", bundle_dir.join(MANIFEST_FILE_NAME).display()))?;
-    let mut reducer = TraceReducer {
-        rollout: RolloutTrace::new(
-            REDUCED_TRACE_SCHEMA_VERSION,
-            manifest.trace_id,
-            manifest.rollout_id,
-            manifest.root_thread_id,
-            manifest.started_at_unix_ms,
-        ),
-        bundle_dir: bundle_dir.to_path_buf(),
-        next_conversation_item_ordinal: 1,
-        next_terminal_operation_ordinal: 1,
-        thread_conversation_snapshots: BTreeMap::new(),
-        pending_compaction_replacement_item_ids: BTreeMap::new(),
-        code_cell_ids_by_runtime: BTreeMap::new(),
-        pending_code_cell_starts: BTreeMap::new(),
-        pending_code_cell_lifecycle_events: BTreeMap::new(),
-        pending_agent_interaction_edges: Vec::new(),
-    };
+    let manifest = read_bundle_manifest(bundle_dir)?;
+    let mut reducer = new_reducer(bundle_dir, manifest);
 
     let event_log_path = bundle_dir.join(RAW_EVENT_LOG_FILE_NAME);
     let event_log = File::open(&event_log_path)
@@ -83,6 +98,124 @@ pub fn replay_bundle(bundle_dir: impl AsRef<Path>) -> Result<RolloutTrace> {
     reducer.resolve_pending_spawn_edge_fallbacks()?;
 
     Ok(reducer.rollout)
+}
+
+/// Replays all usable rich events while retaining per-event failures.
+///
+/// Opening the manifest or event log remains fatal because no trustworthy
+/// bundle identity or event spine exists without them. Malformed lines and
+/// inconsistent events are isolated for diagnostic viewers.
+pub fn replay_bundle_resilient(bundle_dir: impl AsRef<Path>) -> Result<ResilientReplay> {
+    replay_bundle_resilient_with_limits(bundle_dir, ReplayLimits::default())
+}
+
+/// Replays usable rich events within explicit resource limits.
+pub fn replay_bundle_resilient_with_limits(
+    bundle_dir: impl AsRef<Path>,
+    limits: ReplayLimits,
+) -> Result<ResilientReplay> {
+    let bundle_dir = bundle_dir.as_ref();
+    let manifest = read_bundle_manifest(bundle_dir)?;
+    let mut reducer = new_reducer(bundle_dir, manifest);
+    let event_log_path = bundle_dir.join(RAW_EVENT_LOG_FILE_NAME);
+    let event_log = File::open(&event_log_path)
+        .with_context(|| format!("open trace event log {}", event_log_path.display()))?;
+    let mut diagnostics = Vec::new();
+    let mut event_count = 0_usize;
+    let mut semantically_complete = true;
+    let mut can_finalize = true;
+    for (line_index, line) in BufReader::new(event_log).lines().enumerate() {
+        let line_number = line_index + 1;
+        let line = match line {
+            Ok(line) => line,
+            Err(error) => {
+                diagnostics.push(ReplayDiagnostic {
+                    line: Some(line_number),
+                    message: format!("read trace event: {error}"),
+                });
+                semantically_complete = false;
+                break;
+            }
+        };
+        if line.trim().is_empty() {
+            continue;
+        }
+        if line.len() > limits.max_event_bytes {
+            diagnostics.push(ReplayDiagnostic {
+                line: Some(line_number),
+                message: format!(
+                    "trace event exceeds {} byte replay limit",
+                    limits.max_event_bytes
+                ),
+            });
+            semantically_complete = false;
+            continue;
+        }
+        if event_count >= limits.max_events {
+            diagnostics.push(ReplayDiagnostic {
+                line: Some(line_number),
+                message: format!("trace replay stopped after {} events", limits.max_events),
+            });
+            semantically_complete = false;
+            break;
+        }
+        event_count += 1;
+        let event = match serde_json::from_str::<RawTraceEvent>(&line) {
+            Ok(event) => event,
+            Err(error) => {
+                diagnostics.push(ReplayDiagnostic {
+                    line: Some(line_number),
+                    message: format!("parse trace event: {error}"),
+                });
+                semantically_complete = false;
+                continue;
+            }
+        };
+        if let Err(error) = reducer.apply_event(event) {
+            diagnostics.push(ReplayDiagnostic {
+                line: Some(line_number),
+                message: format!("reduce trace event: {error:#}"),
+            });
+            // Reducer handlers are not transactional. Do not process downstream
+            // events or claim semantic completeness after a partial failure.
+            semantically_complete = false;
+            can_finalize = false;
+            break;
+        }
+    }
+    if can_finalize && let Err(error) = reducer.resolve_pending_spawn_edge_fallbacks() {
+        diagnostics.push(ReplayDiagnostic {
+            line: None,
+            message: format!("finalize trace replay: {error:#}"),
+        });
+        semantically_complete = false;
+    }
+    Ok(ResilientReplay {
+        trace: reducer.rollout,
+        diagnostics,
+        semantically_complete,
+    })
+}
+
+fn new_reducer(bundle_dir: &Path, manifest: TraceBundleManifest) -> TraceReducer {
+    TraceReducer {
+        rollout: RolloutTrace::new(
+            REDUCED_TRACE_SCHEMA_VERSION,
+            manifest.trace_id,
+            manifest.rollout_id,
+            manifest.root_thread_id,
+            manifest.started_at_unix_ms,
+        ),
+        bundle_dir: bundle_dir.to_path_buf(),
+        next_conversation_item_ordinal: 1,
+        next_terminal_operation_ordinal: 1,
+        thread_conversation_snapshots: BTreeMap::new(),
+        pending_compaction_replacement_item_ids: BTreeMap::new(),
+        code_cell_ids_by_runtime: BTreeMap::new(),
+        pending_code_cell_starts: BTreeMap::new(),
+        pending_code_cell_lifecycle_events: BTreeMap::new(),
+        pending_agent_interaction_edges: Vec::new(),
+    }
 }
 
 struct TraceReducer {
@@ -139,7 +272,7 @@ impl TraceReducer {
     fn read_payload_json(&self, payload: &RawPayloadRef) -> Result<Value> {
         // Reducers keep raw bodies out of the graph, but typed replay sometimes
         // needs a small subset of fields to build semantic objects.
-        let payload_path = self.bundle_dir.join(&payload.path);
+        let payload_path = resolve_payload_path(&self.bundle_dir, payload)?;
         let file = File::open(&payload_path)
             .with_context(|| format!("open payload {}", payload.raw_payload_id))?;
         serde_json::from_reader(file)
@@ -485,3 +618,36 @@ impl TraceReducer {
             .insert(payload.raw_payload_id.clone(), payload.clone());
     }
 }
+
+fn resolve_payload_path(bundle_dir: &Path, payload: &RawPayloadRef) -> Result<PathBuf> {
+    let bundle_root = std::fs::canonicalize(bundle_dir)
+        .with_context(|| format!("canonicalize trace bundle {}", bundle_dir.display()))?;
+    let relative = Path::new(&payload.path);
+    if relative.is_absolute() {
+        bail!(
+            "payload {} path must be bundle-relative",
+            payload.raw_payload_id
+        );
+    }
+    let candidate = std::fs::canonicalize(bundle_root.join(relative))
+        .with_context(|| format!("resolve payload {}", payload.raw_payload_id))?;
+    if !candidate.starts_with(&bundle_root) {
+        bail!(
+            "payload {} path escapes trace bundle",
+            payload.raw_payload_id
+        );
+    }
+    let metadata = std::fs::metadata(&candidate)
+        .with_context(|| format!("inspect payload {}", payload.raw_payload_id))?;
+    if !metadata.is_file() {
+        bail!(
+            "payload {} path is not a regular file",
+            payload.raw_payload_id
+        );
+    }
+    Ok(candidate)
+}
+
+#[cfg(test)]
+#[path = "payload_path_tests.rs"]
+mod payload_path_tests;

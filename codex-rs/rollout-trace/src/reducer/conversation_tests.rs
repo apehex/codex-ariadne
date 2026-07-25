@@ -256,6 +256,56 @@ fn later_full_request_reuses_prior_json_tool_call_by_position() -> anyhow::Resul
 }
 
 #[test]
+fn replay_truncates_non_ascii_json_summary_and_preserves_raw_payload_ref() -> anyhow::Result<()> {
+    let temp = TempDir::new()?;
+    let writer = create_started_writer(&temp)?;
+    start_turn(&writer, "turn-1")?;
+
+    let request = writer.write_json_payload(
+        RawPayloadKind::InferenceRequest,
+        &json!({
+            "input": [message("user", "search")]
+        }),
+    )?;
+    append_inference_start(&writer, "inference-1", "turn-1", request)?;
+
+    let arguments = serde_json::to_string(&json!({"query": "中".repeat(100)}))?;
+    let response = writer.write_json_payload(
+        RawPayloadKind::InferenceResponse,
+        &json!({
+            "response_id": "resp-1",
+            "output_items": [{
+                "type": "function_call",
+                "name": "search",
+                "arguments": arguments,
+                "call_id": "call-1"
+            }]
+        }),
+    )?;
+    let response_payload = response.clone();
+    append_inference_completion(&writer, "inference-1", "resp-1", response)?;
+
+    let rollout = replay_bundle(temp.path())?;
+    let response_item_id = &rollout.inference_calls["inference-1"].response_item_ids[0];
+
+    assert_eq!(
+        rollout.conversation_items[response_item_id].body,
+        ConversationBody {
+            parts: vec![ConversationPart::Json {
+                summary: format!("{{\"query\":\"{}...", "中".repeat(76)),
+                raw_payload_id: response_payload.raw_payload_id.clone(),
+            }],
+        },
+    );
+    assert_eq!(
+        rollout.raw_payloads[&response_payload.raw_payload_id],
+        response_payload,
+    );
+
+    Ok(())
+}
+
+#[test]
 fn incremental_request_carries_prior_request_and_response_items_forward() -> anyhow::Result<()> {
     let temp = TempDir::new()?;
     let writer = create_started_writer(&temp)?;
