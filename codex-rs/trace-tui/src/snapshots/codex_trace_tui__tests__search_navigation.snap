@@ -1,0 +1,29 @@
+---
+source: trace-tui/src/render_tests.rs
+expression: "render_app(&app, 100, 25)"
+---
+ Codex Trace  read-only · offline │ session 019d0000-0000-7000-8000-000000000101 / thread 019d0000-0
+
+┌ ● Thread tree ───────────────────────────┐┌   Inspector ─────────────────────────────────────────┐
+│  ▾ SES  session 019d0000-0000-7000-8000-0││Rollout record — event                                │
+│    ▾ THR  thread 019d0000-0000-7000-8000-││id: ordinary:019d0000-0000-7000-8000-000000000101:2   │
+│      ▾ THR  thread 019d0000-0000-7000-800││timestamp: 2026-07-25T00:00:01Z                       │
+│        · REC  session metadata           ││evidence: ordinary · semantic                         │
+│        · REC  event                      ││                                                      │
+│      · REC  session metadata             ││{                                                     │
+│▶     · REC  event                        ││  "payload": {                                        │
+│                                          ││    "kind": "plain",                                  │
+│                                          ││    "message": "root needle",                         │
+│                                          ││    "type": "user_message"                            │
+│                                          ││  },                                                  │
+│                                          ││  "timestamp": "2026-07-25T00:00:01Z",                │
+│                                          ││  "type": "event_msg"                                 │
+│                                          ││}                                                     │
+│                                          ││                                                      │
+│                                          ││                                                      │
+│                                          ││                                                      │
+│                                          ││                                                      │
+│                                          ││                                                      │
+│                                          ││                                                      │
+└──────────────────────────────────────────┘└──────────────────────────────────────────────────────┘
+ tree  Tab pane  jk move  h/Backspace parent  Enter open/raw  / search  n/N hits  d diagnostics  q q

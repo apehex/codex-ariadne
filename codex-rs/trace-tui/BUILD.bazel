@@ -1,0 +1,7 @@
+load("//:defs.bzl", "codex_rust_crate")
+
+codex_rust_crate(
+    name = "trace-tui",
+    crate_name = "codex_trace_tui",
+    test_data_extra = glob(["src/snapshots/**"]),
+)

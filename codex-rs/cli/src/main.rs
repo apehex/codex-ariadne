@@ -162,6 +162,9 @@ enum Subcommand {
     /// Diagnose local Codex installation, config, auth, and runtime health.
     Doctor(DoctorCommand),
 
+    /// Browse local agent execution traces.
+    Trace(codex_trace_tui::Cli),
+
     /// Run commands within a Codex-provided sandbox.
     Sandbox(HostSandboxArgs),
 
@@ -1443,6 +1446,14 @@ async fn cli_main(
             )
             .await?;
         }
+        Some(Subcommand::Trace(trace_cli)) => {
+            reject_remote_mode_for_subcommand(
+                root_remote.as_deref(),
+                root_remote_auth_token_env.as_deref(),
+                "trace",
+            )?;
+            codex_trace_tui::run(trace_cli, find_codex_home()?.into_path_buf()).await?;
+        }
         Some(Subcommand::Cloud(mut cloud_cli)) => {
             reject_remote_mode_for_subcommand(
                 root_remote.as_deref(),
@@ -2215,6 +2226,7 @@ fn unsupported_subcommand_name_for_strict_config(
         Some(Subcommand::Completion(_)) => Some("completion"),
         Some(Subcommand::Update) => Some("update"),
         Some(Subcommand::Cloud(_)) => Some("cloud"),
+        Some(Subcommand::Trace(_)) => Some("trace"),
         Some(Subcommand::Sandbox(_)) => Some("sandbox"),
         Some(Subcommand::Debug(_)) => Some("debug"),
         Some(Subcommand::Execpolicy(_)) => Some("execpolicy"),
@@ -4182,6 +4194,25 @@ mod tests {
             panic!("expected features disable");
         };
         assert_eq!(feature, "shell_tool");
+    }
+
+    #[test]
+    fn trace_command_parses_session_selection() {
+        let cli = MultitoolCli::try_parse_from(["codex", "trace", "session-123"])
+            .expect("trace session should parse");
+        assert!(matches!(cli.subcommand, Some(Subcommand::Trace(_))));
+    }
+
+    #[test]
+    fn trace_command_rejects_session_and_bundle_together() {
+        let result = MultitoolCli::try_parse_from([
+            "codex",
+            "trace",
+            "session-123",
+            "--bundle",
+            "trace-bundle",
+        ]);
+        assert!(result.is_err());
     }
 
     #[test]

@@ -1,0 +1,28 @@
+---
+source: trace-tui/src/render_tests.rs
+expression: "render_app(&app, 100, 24)"
+---
+ Codex Trace  read-only · offline │ session rollout-ui / payload SessionMetadata
+
+┌ ● Thread tree ───────────────────────────┐┌   Inspector ─────────────────────────────────────────┐
+│  ▾ SES  session rollout-ui               ││Raw payload — payload SessionMetadata                 │
+│▶   · RAW  payload SessionMetadata        ││id: raw_payload:1                                     │
+│    · THR  thread /root                   ││timestamp: unavailable                                │
+│                                          ││evidence: rich · exact                                │
+│                                          ││                                                      │
+│                                          ││{                                                     │
+│                                          ││  "kind": {                                           │
+│                                          ││    "type": "session_metadata"                        │
+│                                          ││  },                                                  │
+│                                          ││  "path": "payloads/1.json",                          │
+│                                          ││  "raw_payload_id": "raw_payload:1"                   │
+│                                          ││}                                                     │
+│                                          ││                                                      │
+│                                          ││Raw payload collapsed. Press Enter (or r) to load up t│
+│                                          ││                                                      │
+│                                          ││                                                      │
+│                                          ││                                                      │
+│                                          ││                                                      │
+│                                          ││                                                      │
+└──────────────────────────────────────────┘└──────────────────────────────────────────────────────┘
+ tree  Tab pane  jk move  h/Backspace parent  Enter open/raw  / search  n/N hits  d diagnostics  q q

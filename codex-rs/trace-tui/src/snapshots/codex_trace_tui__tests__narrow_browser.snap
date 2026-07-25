@@ -1,0 +1,28 @@
+---
+source: trace-tui/src/render_tests.rs
+expression: "render_app(&picker, 66, 24)"
+---
+ Codex Trace  read-only · offline │ session 019d0000-0000-7000-800
+
+┌ ● Thread tree ─────────────────────────────────────────────────┐
+│▶ ▾ SES  session 019d0000-0000-7000-8000-000000000101           │
+│    ▸ THR  thread 019d0000-0000-7000-8000-000000000101          │
+│                                                                │
+│                                                                │
+│                                                                │
+│                                                                │
+│                                                                │
+│                                                                │
+│                                                                │
+│                                                                │
+│                                                                │
+│                                                                │
+│                                                                │
+│                                                                │
+│                                                                │
+│                                                                │
+│                                                                │
+│                                                                │
+│                                                                │
+└────────────────────────────────────────────────────────────────┘
+ tree  Tab pane  jk move  h/Backspace parent  Enter open/raw  / se
