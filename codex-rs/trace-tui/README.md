@@ -1,10 +1,6 @@
 # Ariadne trace browser
 
-Ariadne turns Codex's local execution records into a navigable tree. It is
-designed for operators who need to understand not only what an agent answered,
-but how work moved between turns, tools, model requests, and delegated agents.
-
-The first interface is:
+`codex-trace-tui` is the Ratatui interface behind `codex trace`. It lets an operator select a historical root session, follow nested agent threads, inspect semantic and raw trace nodes, and search the selected tree.
 
 ```bash
 codex trace
@@ -13,23 +9,15 @@ codex trace --bundle <trace-bundle>
 codex trace --trace-root <directory>
 ```
 
-`codex trace` opens a historical root-session picker. Supplying a session or
-bundle opens it directly. A later milestone adds `/trace` to the live Codex TUI
-using the same source and navigation model.
+With no target, `codex trace` opens a searchable root-session picker. Supplying a session or bundle opens it directly. The browser uses the source and evidence model provided by [`codex-trace`](../trace/).
 
 ## Status
 
-The first historical browser is implemented on the `ariadne` branch: local
-ordinary sessions and opt-in rich bundles can be selected, navigated, searched,
-and inspected through `codex trace`. See
-[`project/2026-07-25-v1-receipt.md`](project/2026-07-25-v1-receipt.md) for
-validation and known limitations, and
-[`project/2026-07-25-plan.md`](project/2026-07-25-plan.md) for successor
-milestones.
+The first historical browser is implemented on the `ariadne` branch. It supports ordinary sessions, opt-in rich bundles, and merged roots with a picker, adaptive tree browser, inspector, selected-root semantic search, diagnostics, and lazy raw payloads.
+
+The implementation receipt and validation are preserved in the [closed V1 plan](../../.ariadne/plans/closed/2026-07-25-ariadne-codex-trace-browser.md). Later timeline, diagnostic, live, and observability directions are non-executable items in the [roadmap](../../.ariadne/ROADMAP.md).
 
 ## Mental model
-
-The browser treats an agent workflow like a filesystem:
 
 ```text
 root session
@@ -44,70 +32,19 @@ root session
     └── diagnostic
 ```
 
-Entering a directory-like node reveals its children. Opening an item-like node
-shows semantic metadata and, where available, the exact raw records that support
-it. Breadcrumbs and parent/child jumps preserve orientation across delegated
-work.
+Entering a directory-like node reveals its children. Opening an item-like node shows semantic metadata and, when available, the raw records supporting it. Breadcrumbs and parent navigation preserve orientation across delegated work.
 
-The initial browser provides:
+The synchronized cross-thread timeline, live following, export, annotations, and `/trace` integration are not part of the current browser.
 
-- a searchable root-session picker;
-- nested parent/child agent navigation;
-- turns, inference calls, messages, tools, compactions, and diagnostics;
-- semantic and raw inspectors with source-capability labels;
-- search across the selected root and all descendants;
-- lazy loading suitable for large histories.
+## Privacy and source behavior
 
-The synchronized cross-thread timeline, live following, export, annotations,
-and `/trace` integration are later milestones.
+Browsing is local, offline, and read-only. The application does not initialize authentication, make model calls, require the network, or mutate rollout and bundle inputs.
 
-## Trace sources
+Raw prompts, responses, commands, tool arguments, outputs, terminal content, and paths may be sensitive. Payloads start collapsed, referenced paths remain contained to their bundle, and displayed content is sanitized as inert terminal text.
 
-### Ordinary rollouts
-
-Normal Codex JSONL sessions under `~/.codex/sessions` contain the durable
-transcript and lifecycle records available to every user. They support useful
-historical browsing, but may not contain an exact context snapshot for every
-model generation. Multi-agent messages may also be encrypted.
-
-### Rich rollout-trace bundles
-
-Setting `CODEX_ROLLOUT_TRACE_ROOT` opts a run into the existing
-`codex-rollout-trace` recorder. Its bundle contains ordered raw events, payload
-references, and a reducer that derives model-visible and runtime objects. This
-is the preferred source for exact inference boundaries and causal edges.
-
-Rich traces are local diagnostic artifacts, not telemetry. They can include
-prompts, responses, commands, tool inputs and outputs, terminal output, and
-paths. Treat the entire bundle as sensitive.
-
-### Merged view
-
-When an ordinary rollout and rich bundle identify the same root, Ariadne shows
-a merged tree. It preserves both sources and reports their capabilities:
-
-- `exact`: directly supported by a raw captured payload;
-- `semantic`: represented by an ordinary or reduced semantic record;
-- `reconstructed`: derived deterministically from surrounding records;
-- `unavailable`: expected evidence was not recorded or cannot be decrypted;
-- `conflicting`: sources disagree and both observations remain inspectable.
-
-## Privacy and safety
-
-Browsing is local, offline, and read-only. It makes no model calls and does not
-require Codex authentication. Ariadne must not change a rollout, bundle,
-payload, state database, archive marker, or timestamp.
-
-Raw payloads start collapsed for readability. Opening them is an ordinary local
-inspection action, not a network disclosure. Payload paths are contained to
-their bundle and content is rendered as inert, control-character-safe text.
-
-Only synthetic trace fixtures belong in this repository. See the public-data
-policy in [`FORK.md`](../../FORK.md).
+The cross-crate [Ariadne design](../../.ariadne/DESIGN.md) defines source reconciliation and evidence grades. The [`codex-trace` design](../trace/DESIGN.md) defines projection, bounds, search, and payload behavior.
 
 ## Navigation
-
-The browser follows Codex and Vim conventions:
 
 | Key | Action |
 | --- | --- |
@@ -121,14 +58,8 @@ The browser follows Codex and Vim conventions:
 | Esc | Close inspector or search |
 | `q` | Quit |
 
-The wide layout uses hierarchy, entries, and inspector panes. Medium and narrow
-terminals collapse to two and one pane without changing the navigation model.
+Wide terminals show hierarchy, entries, and inspector panes. Medium and narrow terminals collapse to two and one pane without changing the enter/back navigation model.
 
-## Contributing
+## Development route
 
-Start with [`DESIGN.md`](DESIGN.md) and the local [`AGENTS.md`](AGENTS.md).
-The fork strategy and upstream route are documented in [`FORK.md`](../../FORK.md).
-
-OpenAI Codex currently accepts outside pull requests only by invitation. The
-project therefore keeps a reviewable issue draft and clean upstream-candidate
-route rather than assuming that fork changes will be accepted.
+Read the local [`AGENTS.md`](AGENTS.md) and [`DESIGN.md`](DESIGN.md) before changing application state or rendering. Project identity, plans, decisions, privacy policy, and upstream material are indexed by [`.ariadne/README.md`](../../.ariadne/README.md).
