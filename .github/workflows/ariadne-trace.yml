@@ -1,0 +1,79 @@
+name: Ariadne trace
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".ariadne/**"
+      - ".github/workflows/ariadne-trace.yml"
+      - "codex-rs/cli/**"
+      - "codex-rs/trace/**"
+      - "codex-rs/trace-tui/**"
+      - "codex-rs/rollout-trace/**"
+      - "codex-rs/Cargo.lock"
+      - "codex-rs/Cargo.toml"
+  push:
+    branches:
+      - ariadne
+    paths:
+      - ".ariadne/**"
+      - ".github/workflows/ariadne-trace.yml"
+      - "codex-rs/cli/**"
+      - "codex-rs/trace/**"
+      - "codex-rs/trace-tui/**"
+      - "codex-rs/rollout-trace/**"
+      - "codex-rs/Cargo.lock"
+      - "codex-rs/Cargo.toml"
+
+permissions:
+  contents: read
+
+jobs:
+  trace:
+    name: Trace / ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux
+            runner: ubuntu-24.04
+          - name: macOS
+            runner: macos-15
+          - name: Windows
+            runner: windows-2025
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-ci
+      - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582 # 1.95.0
+
+      - name: Generate and verify deterministic public demo
+        run: |
+          python .ariadne/demo/demo.py generate "$RUNNER_TEMP/ariadne-synthetic-bundle"
+          python .ariadne/demo/demo.py verify "$RUNNER_TEMP/ariadne-synthetic-bundle"
+
+      - name: Test trace model and TUI
+        working-directory: codex-rs
+        run: cargo test --locked -p codex-trace -p codex-trace-tui
+
+      - name: Test CLI trace integration
+        working-directory: codex-rs
+        run: cargo test --locked -p codex-cli --bin codex trace_command
+
+      - name: Replay public demo through the authoritative reducer
+        working-directory: codex-rs
+        run: >-
+          cargo run --locked -p codex-cli --
+          debug trace-reduce
+          "$RUNNER_TEMP/ariadne-synthetic-bundle"
+          --output "$RUNNER_TEMP/ariadne-synthetic-state.json"
+
+      - name: Check for a clean worktree
+        if: always() && !cancelled()
+        uses: ./.github/actions/check-clean-worktree

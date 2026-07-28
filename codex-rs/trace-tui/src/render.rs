@@ -1,3 +1,4 @@
+use codex_trace::EvidenceGrade;
 use codex_trace::TraceNodeKind;
 use codex_trace::TraceSourceKind;
 use codex_trace::TraceStatus;
@@ -24,12 +25,11 @@ use crate::app::pane_name;
 use crate::app::picker_matches;
 use crate::browser::BrowserPane;
 use crate::browser::BrowserState;
-use crate::browser::PayloadDisplay;
 
 const WIDE_MIN: u16 = 120;
 const MEDIUM_MIN: u16 = 78;
 
-pub(crate) fn render(frame: &mut Frame<'_>, app: &App) {
+pub(crate) fn render(frame: &mut Frame<'_>, app: &mut App) {
     let [header, body, footer] = Layout::vertical([
         Constraint::Length(2),
         Constraint::Min(3),
@@ -37,9 +37,17 @@ pub(crate) fn render(frame: &mut Frame<'_>, app: &App) {
     ])
     .areas(frame.area());
     render_header(frame, header, app);
-    match &app.screen {
+    let App {
+        screen,
+        catalog,
+        notice,
+        ..
+    } = app;
+    match screen {
         Screen::Loading(message) => render_centered_message(frame, body, message, "Loading"),
-        Screen::Picker(picker) => render_picker(frame, body, app, picker),
+        Screen::Picker(picker) => {
+            render_picker(frame, body, catalog.as_ref(), notice.as_deref(), picker)
+        }
         Screen::Browser(browser) => render_browser(frame, body, browser),
         Screen::Error(message) => render_centered_message(frame, body, message, "Trace error"),
     }
@@ -62,13 +70,19 @@ fn render_header(frame: &mut Frame<'_>, area: Rect, app: &App) {
     frame.render_widget(Paragraph::new(Line::from(line)), area);
 }
 
-fn render_picker(frame: &mut Frame<'_>, area: Rect, app: &App, picker: &PickerState) {
-    let Some(catalog) = &app.catalog else {
+fn render_picker(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    catalog: Option<&codex_trace::TraceCatalog>,
+    notice: Option<&str>,
+    picker: &PickerState,
+) {
+    let Some(catalog) = catalog else {
         render_centered_message(frame, area, "catalog unavailable", "Root sessions");
         return;
     };
     let mut lines = Vec::new();
-    if let Some(notice) = &app.notice {
+    if let Some(notice) = notice {
         lines.push(ListItem::new(Line::from(vec![
             "! ".cyan(),
             sanitize_display(notice).cyan(),
@@ -131,7 +145,7 @@ fn render_picker(frame: &mut Frame<'_>, area: Rect, app: &App, picker: &PickerSt
         1 + catalog.diagnostics.len().min(3) + usize::from(catalog.diagnostics.len() > 3)
     };
     let selected = picker.selected
-        + usize::from(app.notice.is_some())
+        + usize::from(notice.is_some())
         + diagnostic_rows
         + usize::from(picker.search.is_some());
     let mut state = ListState::default().with_selected(Some(selected));
@@ -146,7 +160,7 @@ fn render_picker(frame: &mut Frame<'_>, area: Rect, app: &App, picker: &PickerSt
     frame.render_stateful_widget(list, area, &mut state);
 }
 
-fn render_browser(frame: &mut Frame<'_>, area: Rect, browser: &BrowserState) {
+fn render_browser(frame: &mut Frame<'_>, area: Rect, browser: &mut BrowserState) {
     if area.width >= WIDE_MIN {
         let [tree, children, inspector] = Layout::horizontal([
             Constraint::Percentage(34),
@@ -182,7 +196,13 @@ fn render_browser(frame: &mut Frame<'_>, area: Rect, browser: &BrowserState) {
 }
 
 fn render_tree(frame: &mut Frame<'_>, area: Rect, browser: &BrowserState) {
-    let rows = browser.visible_rows();
+    let capacity = area.height.saturating_sub(2).max(1) as usize;
+    let range = viewport(
+        browser.visible_row_count(),
+        browser.selected_index(),
+        capacity,
+    );
+    let rows = browser.visible_rows_window(range.start, range.len());
     let items = rows
         .iter()
         .map(|row| {
@@ -199,7 +219,8 @@ fn render_tree(frame: &mut Frame<'_>, area: Rect, browser: &BrowserState) {
             ]))
         })
         .collect::<Vec<_>>();
-    let mut state = ListState::default().with_selected(Some(browser.selected_index()));
+    let mut state = ListState::default()
+        .with_selected(Some(browser.selected_index().saturating_sub(range.start)));
     let list = List::new(items)
         .block(pane_block("Thread tree", browser.pane == BrowserPane::Tree))
         .highlight_symbol("▶ ")
@@ -208,7 +229,9 @@ fn render_tree(frame: &mut Frame<'_>, area: Rect, browser: &BrowserState) {
 }
 
 fn render_children(frame: &mut Frame<'_>, area: Rect, browser: &BrowserState) {
-    let children = browser.children();
+    let capacity = area.height.saturating_sub(2).max(1) as usize;
+    let range = viewport(browser.child_count(), browser.child_index, capacity);
+    let children = browser.children_window(range.start, range.len());
     let items = if children.is_empty() {
         vec![ListItem::new("No child nodes")]
     } else {
@@ -222,7 +245,8 @@ fn render_children(frame: &mut Frame<'_>, area: Rect, browser: &BrowserState) {
             })
             .collect()
     };
-    let selected = (!children.is_empty()).then_some(browser.child_index);
+    let selected =
+        (!children.is_empty()).then_some(browser.child_index.saturating_sub(range.start));
     let mut state = ListState::default().with_selected(selected);
     let list = List::new(items)
         .block(pane_block(
@@ -234,92 +258,19 @@ fn render_children(frame: &mut Frame<'_>, area: Rect, browser: &BrowserState) {
     frame.render_stateful_widget(list, area, &mut state);
 }
 
-fn render_inspector(frame: &mut Frame<'_>, area: Rect, browser: &BrowserState) {
+fn render_inspector(frame: &mut Frame<'_>, area: Rect, browser: &mut BrowserState) {
     let inner_width = area.width.saturating_sub(2).max(1) as usize;
-    let mut lines = Vec::new();
-    if let Some(node) = browser.selected_node() {
-        lines.extend(wrapped_lines(
-            &format!("{} — {}", kind_name(node.locator.kind), node.label),
-            inner_width,
-        ));
-        lines.push(Line::from(vec![
-            "id: ".dim(),
-            sanitize_display(&node.locator.id).into(),
-        ]));
-        lines.push(Line::from(vec![
-            "timestamp: ".dim(),
-            sanitize_display(node.timestamp.as_deref().unwrap_or("unavailable")).into(),
-        ]));
-        lines.push(Line::from(vec![
-            "evidence: ".dim(),
-            format!(
-                "{} · {}",
-                source_name(node.provenance),
-                evidence_name(node.evidence)
-            )
-            .into(),
-        ]));
-        if node.locator.kind == TraceNodeKind::Session {
-            let capabilities = browser.summary().capabilities;
-            lines.push(Line::from("capabilities:").dim());
-            lines.extend([
-                capability_line("ordinary transcript", capabilities.ordinary_transcript),
-                capability_line("raw rollout records", capabilities.raw_rollout_records),
-                capability_line(
-                    "exact inference context",
-                    capabilities.exact_inference_context,
-                ),
-                capability_line("per-generation usage", capabilities.per_generation_usage),
-                capability_line("runtime graph", capabilities.runtime_graph),
-                capability_line("raw payloads", capabilities.raw_payloads),
-                capability_line("compaction detail", capabilities.compaction_detail),
-            ]);
-        }
-        lines.push(Line::from(""));
-        let detail = serde_json::to_string_pretty(&node.detail)
-            .unwrap_or_else(|error| format!("cannot render node detail: {error}"));
-        lines.extend(wrapped_lines(&detail, inner_width));
-        if node.locator.kind == TraceNodeKind::RawPayload {
-            lines.push(Line::from(""));
-            match browser.payload_display(&node.locator.id) {
-                None => lines.push(Line::from(
-                    "Raw payload collapsed. Press Enter (or r) to load up to 1 MiB.".cyan(),
-                )),
-                Some(PayloadDisplay::Loading) => {
-                    lines.push(Line::from("Loading raw payload…".cyan()));
-                }
-                Some(PayloadDisplay::Failed(message)) => {
-                    lines.push(Line::from(vec![
-                        "Raw payload unavailable: ".red(),
-                        sanitize_display(message).into(),
-                    ]));
-                }
-                Some(PayloadDisplay::Loaded(payload)) => {
-                    let suffix = if payload.truncated {
-                        " [truncated]"
-                    } else {
-                        ""
-                    };
-                    lines.push(
-                        Line::from(format!(
-                            "Raw payload · {} bytes observed{suffix}",
-                            payload.original_bytes_read
-                        ))
-                        .dim(),
-                    );
-                    lines.extend(wrapped_lines(&payload.text, inner_width));
-                }
-            }
-        }
-    } else {
-        lines.push("No inspectable node".into());
-    }
-    let inspector = Paragraph::new(Text::from(lines))
-        .block(pane_block(
-            "Inspector",
-            browser.pane == BrowserPane::Inspector,
-        ))
-        .scroll((browser.inspector_scroll.min(u16::MAX as usize) as u16, 0));
+    let inner_height = area.height.saturating_sub(2).max(1) as usize;
+    let lines = browser
+        .prepare_inspector(inner_width, inner_height)
+        .iter()
+        .cloned()
+        .map(Line::from)
+        .collect::<Vec<_>>();
+    let inspector = Paragraph::new(Text::from(lines)).block(pane_block(
+        "Inspector",
+        browser.pane == BrowserPane::Inspector,
+    ));
     frame.render_widget(inspector, area);
 }
 
@@ -338,12 +289,16 @@ fn render_search(frame: &mut Frame<'_>, area: Rect, browser: &BrowserState) {
         ),
         input,
     );
+    let capacity = results.height.saturating_sub(2).max(1) as usize;
+    let range = viewport(search.hits.len(), search.selected, capacity);
     let items = if search.hits.is_empty() {
         vec![ListItem::new("Press Enter to search")]
     } else {
         search
             .hits
             .iter()
+            .skip(range.start)
+            .take(range.len())
             .map(|hit| {
                 ListItem::new(Line::from(vec![
                     format!("{:<4} ", kind_tag(hit.locator.kind)).magenta(),
@@ -358,7 +313,7 @@ fn render_search(frame: &mut Frame<'_>, area: Rect, browser: &BrowserState) {
             })
             .collect()
     };
-    let selected = (!search.hits.is_empty()).then_some(search.selected);
+    let selected = (!search.hits.is_empty()).then_some(search.selected.saturating_sub(range.start));
     let mut state = ListState::default().with_selected(selected);
     frame.render_stateful_widget(
         List::new(items)
@@ -372,11 +327,15 @@ fn render_search(frame: &mut Frame<'_>, area: Rect, browser: &BrowserState) {
 fn render_diagnostics(frame: &mut Frame<'_>, area: Rect, browser: &BrowserState) {
     frame.render_widget(Clear, area);
     let diagnostics = browser.diagnostics();
+    let capacity = area.height.saturating_sub(2).max(1) as usize;
+    let range = viewport(diagnostics.len(), browser.diagnostic_index, capacity);
     let items = if diagnostics.is_empty() {
         vec![ListItem::new("No diagnostics recorded for this session.")]
     } else {
         diagnostics
             .iter()
+            .skip(range.start)
+            .take(range.len())
             .map(|diagnostic| {
                 let path = diagnostic
                     .path
@@ -390,7 +349,8 @@ fn render_diagnostics(frame: &mut Frame<'_>, area: Rect, browser: &BrowserState)
             })
             .collect()
     };
-    let selected = (!diagnostics.is_empty()).then_some(browser.diagnostic_index);
+    let selected =
+        (!diagnostics.is_empty()).then_some(browser.diagnostic_index.saturating_sub(range.start));
     let mut state = ListState::default().with_selected(selected);
     frame.render_stateful_widget(
         List::new(items)
@@ -552,32 +512,14 @@ fn kind_tag(kind: TraceNodeKind) -> &'static str {
     }
 }
 
-fn kind_name(kind: TraceNodeKind) -> &'static str {
-    match kind {
-        TraceNodeKind::Session => "Session",
-        TraceNodeKind::Thread => "Agent thread",
-        TraceNodeKind::Turn => "Turn",
-        TraceNodeKind::Inference => "Inference call",
-        TraceNodeKind::ConversationItem => "Conversation item",
-        TraceNodeKind::ToolCall => "Tool call",
-        TraceNodeKind::CodeCell => "Code cell",
-        TraceNodeKind::TerminalSession => "Terminal session",
-        TraceNodeKind::TerminalOperation => "Terminal operation",
-        TraceNodeKind::Compaction => "Compaction",
-        TraceNodeKind::CompactionRequest => "Compaction request",
-        TraceNodeKind::InteractionEdge => "Interaction edge",
-        TraceNodeKind::RawPayload => "Raw payload",
-        TraceNodeKind::RolloutRecord => "Rollout record",
-        TraceNodeKind::Diagnostic => "Diagnostic",
+fn viewport(total: usize, selected: usize, capacity: usize) -> std::ops::Range<usize> {
+    if total == 0 {
+        return 0..0;
     }
+    let capacity = capacity.max(1).min(total);
+    let selected = selected.min(total - 1);
+    let start = selected
+        .saturating_sub(capacity / 2)
+        .min(total.saturating_sub(capacity));
+    start..start + capacity
 }
-
-fn capability_line(name: &str, available: bool) -> Line<'static> {
-    let marker = if available { "yes" } else { "no" };
-    Line::from(vec![
-        "  ".into(),
-        format!("{name}: ").dim(),
-        marker.to_string().into(),
-    ])
-}
-use codex_trace::EvidenceGrade;

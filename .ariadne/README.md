@@ -14,9 +14,23 @@ This directory is the fork-owned project control plane. It keeps Ariadne policy 
 | [`plans/`](plans/) | Draft, executable, and closed work plans |
 | [`ROADMAP.md`](ROADMAP.md) | Non-executable successor directions |
 | [`decisions/`](decisions/) | Durable architectural decisions |
+| [`demo/`](demo/) | Deterministic synthetic bundle generator and normal-interface launcher |
+| [`releases/`](releases/) | Release-candidate build, validation, and operator handoff material |
 | [`upstream/`](upstream/) | Generalized upstream discussion material |
 | [`../codex-rs/trace/`](../codex-rs/trace/) | Source discovery, normalization, provenance, bounds, search, and safe payload access |
 | [`../codex-rs/trace-tui/`](../codex-rs/trace-tui/) | Historical Ratatui application, navigation, and rendering |
+
+## Public prototype quick start
+
+Build the locked workspace release binary, install a copy beside upstream Codex as `codex-ariadne`, and run the deterministic synthetic demonstration:
+
+```console
+cargo build --locked --manifest-path codex-rs/Cargo.toml --release -p codex-cli
+python .ariadne/demo/demo.py run --binary ./codex-rs/target/release/codex
+```
+
+See the [release-candidate instructions](releases/2026-07-28-trace-browser-rc.md) for Linux, macOS, and Windows side-by-side installation and evidence capture.
+The focused [Ariadne trace workflow](../.github/workflows/ariadne-trace.yml) validates the trace crates, CLI parsing, and generated bundle on all three operating systems.
 
 ## Instruction discovery
 

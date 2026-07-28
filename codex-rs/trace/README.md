@@ -12,7 +12,9 @@ let catalog = repository.discover().await;
 let session = catalog.load_session(session_id).await?;
 ```
 
-The crate re-exports its public model from `src/model.rs` and its contained payload reader from `src/payload.rs`.
+`SessionTrace::index()` constructs a `TraceIndex` snapshot for routine locator, root, and child lookup. The index also exposes compact node positions for consumers that retain an immutable loaded trace. Rebuild it after inserting, removing, or reordering nodes or changing a node locator or parent.
+
+The crate re-exports its public model from `src/model.rs`, trace index from `src/index.rs`, and contained payload reader from `src/payload.rs`.
 
 ## Source pipeline
 
@@ -31,8 +33,10 @@ Discovery is metadata-oriented and does not eagerly reduce every rich bundle. Pr
 | `src/catalog.rs` | Repository configuration, discovery, selection, ordinary projection, and source reconciliation |
 | `src/rich.rs` | Rich bundle reduction and normalized rich-node projection |
 | `src/model.rs` | Public catalog, node, locator, capability, evidence, limit, diagnostic, and search-result types |
+| `src/index.rs` | Snapshot index for locator lookup, root and child traversal, and compact node positions |
 | `src/search.rs` | Bounded attributed semantic search |
 | `src/payload.rs` | Canonically contained, size-limited, terminal-safe payload reads |
+| `src/index_tests.rs` | Index ordering, lookup, compact-position, and snapshot-invalidation tests |
 | `src/trace_tests.rs` | Ordinary, merged, discovery, graph, search, limit, and preservation tests |
 | `src/rich_tests.rs` | Rich projection, payload, malformed-input, and compatibility tests |
 

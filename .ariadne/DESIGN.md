@@ -28,6 +28,15 @@ rich bundles ─────── codex-rollout-trace ─────┘
 
 The CLI owns argument parsing and launch. A future live `/trace` view should reuse both crates rather than create a second inspection model.
 
+## Distribution and public demonstration
+
+Source builds produce the upstream-compatible `codex` executable.
+Ariadne's release instructions copy that artifact under the side-by-side name `codex-ariadne`; fork identity is a distribution boundary and does not require a second Cargo binary target or a change to upstream's internal help spelling.
+
+The public demonstration is a deterministic generator for an existing rollout-trace bundle plus a launcher for `codex trace --bundle`.
+It is not a fixture captured from a real session, a new persisted format, a demo-only reducer path, or a live tracing mode.
+The authoritative Rust reducer remains the compatibility oracle for generated bundle content.
+
 ## Sources and evidence
 
 Ordinary session JSONL supports transcript and lifecycle navigation but is not assumed to contain an exact request context for every generation. Collaboration content may be encrypted or otherwise unavailable.

@@ -83,7 +83,7 @@ pub enum TraceStatus {
 }
 
 /// Stable kind component of a [`TraceNodeLocator`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TraceNodeKind {
     Session,
@@ -104,7 +104,7 @@ pub enum TraceNodeKind {
 }
 
 /// Stable address for one node within a session.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct TraceNodeLocator {
     pub session_id: String,
     pub kind: TraceNodeKind,
@@ -203,6 +203,10 @@ pub struct SessionTrace {
 }
 
 impl SessionTrace {
+    pub fn index(&self) -> crate::TraceIndex {
+        crate::TraceIndex::new(self)
+    }
+
     pub fn root_nodes(&self) -> impl Iterator<Item = &TraceNode> {
         self.nodes.iter().filter(|node| node.parent.is_none())
     }

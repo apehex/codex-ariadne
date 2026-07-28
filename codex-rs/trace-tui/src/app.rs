@@ -1,6 +1,7 @@
 use codex_trace::PayloadReadLimit;
 use codex_trace::RawPayloadHandle;
 use codex_trace::SanitizedPayload;
+#[cfg(test)]
 use codex_trace::SessionTrace;
 use codex_trace::TraceCatalog;
 use codex_trace::TraceSourceKind;
@@ -99,9 +100,14 @@ impl App {
         }
     }
 
-    pub(crate) fn install_session(&mut self, trace: SessionTrace) {
+    pub(crate) fn install_browser(&mut self, browser: BrowserState) {
         self.notice = None;
-        self.screen = Screen::Browser(Box::new(BrowserState::new(trace)));
+        self.screen = Screen::Browser(Box::new(browser));
+    }
+
+    #[cfg(test)]
+    pub(crate) fn install_session(&mut self, trace: SessionTrace) {
+        self.install_browser(BrowserState::new(trace));
     }
 
     pub(crate) fn install_payload(&mut self, id: String, result: anyhow::Result<SanitizedPayload>) {

@@ -8,7 +8,7 @@ The first historical `codex trace` browser and its ordinary, rich, and merged tr
 
 Add a synchronized cross-thread timeline and evidence-backed diagnostics for unjoined delegation, interruption, failed tools, approval waits, unintegrated child results, compactions, and unusual resource consumption. Diagnostics must describe recorded behavior rather than infer agent intent, include positive and false-positive synthetic tests, and open their supporting nodes.
 
-Performance and responsiveness hardening belongs in the plan that first measures representative synthetic traces. Candidate gaps include eager whole-trace formatting, repeated full-node scans, detail reserialization, chunk-bounded JSONL reading, cooperative rich-replay cancellation, and content-level merge conflict detection.
+The current browser uses index-backed adjacency, cached visible rows and inspector content, viewport-only rendering, and subtree-local expansion and collapse. Future performance work should begin with representative measurement and target unresolved gaps such as chunk-bounded JSONL reading, cooperative rich-replay cancellation, and content-level merge conflict detection.
 
 ## Live `/trace`
 
@@ -20,4 +20,5 @@ Propose recorder, persisted-schema, core-runtime, or app-server additions only f
 
 ## Release evidence
 
-Before describing the browser as cross-platform, obtain macOS and Windows build and test evidence using platform-neutral synthetic fixtures. Linux-only validation remains the current recorded state.
+Before describing the browser as cross-platform, obtain successful Linux, macOS, and Windows runs of the focused trace workflow for the exact release-candidate commit using platform-neutral synthetic fixtures.
+The workflow configuration and release-candidate instructions define the evidence route but are not themselves evidence that any platform passed.

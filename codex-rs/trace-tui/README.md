@@ -42,6 +42,8 @@ Browsing is local, offline, and read-only. The application does not initialize a
 
 Raw prompts, responses, commands, tool arguments, outputs, terminal content, and paths may be sensitive. Payloads start collapsed, referenced paths remain contained to their bundle, and displayed content is sanitized as inert terminal text.
 
+Rendering is viewport-bounded. Structured node detail is limited to 64 KiB with an explicit truncation notice, and a loaded raw payload is wrapped only for the currently visible inspector window. The complete retained trace is not rescanned during ordinary cursor movement or redraw.
+
 The cross-crate [Ariadne design](../../.ariadne/DESIGN.md) defines source reconciliation and evidence grades. The [`codex-trace` design](../trace/DESIGN.md) defines projection, bounds, search, and payload behavior.
 
 ## Navigation

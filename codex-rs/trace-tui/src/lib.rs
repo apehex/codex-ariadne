@@ -15,7 +15,6 @@ use anyhow::Result;
 use anyhow::bail;
 use clap::Args;
 use codex_trace::SanitizedPayload;
-use codex_trace::SessionTrace;
 use codex_trace::TraceCatalog;
 use codex_trace::TraceRepository;
 use crossterm::cursor;
@@ -30,6 +29,7 @@ use tokio::task::JoinHandle;
 
 use crate::app::App;
 use crate::app::AppAction;
+use crate::browser::BrowserState;
 
 /// Arguments for the historical trace browser.
 #[derive(Debug, Clone, Args)]
@@ -113,9 +113,9 @@ async fn run_event_loop(
 fn apply_worker_result(app: &mut App, result: WorkerResult) -> AppAction {
     match result {
         WorkerResult::Catalog(catalog) => app.install_catalog(catalog),
-        WorkerResult::Session(result) => match result {
-            Ok(trace) => {
-                app.install_session(trace);
+        WorkerResult::Session(result) => match *result {
+            Ok(browser) => {
+                app.install_browser(browser);
                 AppAction::None
             }
             Err(error) => {
@@ -155,7 +155,9 @@ fn dispatch_action(
                 return false;
             };
             jobs.push(tokio::spawn(async move {
-                WorkerResult::Session(catalog.load_session(&id).await)
+                WorkerResult::Session(Box::new(
+                    catalog.load_session(&id).await.map(BrowserState::new),
+                ))
             }));
             false
         }
@@ -218,7 +220,7 @@ fn normalize_trace_root(path: &Path) -> Result<PathBuf> {
 
 enum WorkerResult {
     Catalog(TraceCatalog),
-    Session(Result<SessionTrace>),
+    Session(Box<Result<BrowserState>>),
     Payload {
         id: String,
         result: Result<SanitizedPayload>,

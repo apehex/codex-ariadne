@@ -42,7 +42,9 @@ Reconciliation is additive:
 
 `TraceLimits` bounds discovery, ordinary records, rich events and sizes, projected nodes, search fields, and search hits. A reached limit produces a diagnostic that explains the incomplete view.
 
-The selected trace is currently retained as a node map plus root list, and `SessionTrace::children` and semantic search traverse retained nodes. Consumers must not call full-set operations per rendered frame. Future performance work should add model-owned adjacency and indexes before duplicating them in the TUI.
+The selected trace is retained as a public node vector. `TraceIndex` provides a separately owned snapshot over that vector for locator lookup, roots, and parent-to-child adjacency. It builds in linear time, preserves node-vector order, provides expected constant-time selection before result iteration, and avoids duplicating graph semantics in consumers.
+
+The index is deliberately not embedded in `SessionTrace`: its public nodes and their structural fields remain mutable for compatibility, so a hidden cache could silently become stale. Consumers build one index per loaded session and must rebuild it after inserting, removing, or reordering nodes or changing a locator or parent. Existing `SessionTrace` lookup methods retain their signatures and scan behavior for compatibility; routine browser navigation should use `TraceIndex`.
 
 Rich replay is selected-root lazy but the upstream reducer is synchronous once invoked. An individual JSONL line can be allocated by the buffered reader before its configured size is rejected. Cooperative replay cancellation and chunk-bounded line reading are known hardening gaps.
 

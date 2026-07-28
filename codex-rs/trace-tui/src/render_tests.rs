@@ -1,10 +1,16 @@
 use std::fs;
+use std::fs::File;
+use std::io::BufWriter;
+use std::io::Write;
 use std::path::Path;
+use std::time::Duration;
+use std::time::Instant;
 
 use clap::Parser;
 use codex_rollout_trace::RawPayloadKind;
 use codex_rollout_trace::RawTraceEventPayload;
 use codex_rollout_trace::TraceWriter;
+use codex_trace::SanitizedPayload;
 use codex_trace::TraceRepository;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
@@ -116,19 +122,27 @@ async fn picker_and_adaptive_browser_have_stable_snapshots() {
         picker.install_catalog(catalog.clone()),
         AppAction::None
     ));
-    assert_snapshot!("root_picker", render_app(&picker, 120, 22));
+    assert_snapshot!("root_picker", render_app(&mut picker, 120, 22));
     picker.handle_key(key(KeyCode::Char('/')));
     for ch in "synthetic".chars() {
         picker.handle_key(key(KeyCode::Char(ch)));
     }
-    assert_snapshot!("picker_filter", render_app(&picker, 100, 18));
+    assert_snapshot!("picker_filter", render_app(&mut picker, 100, 18));
     picker.handle_key(key(KeyCode::Esc));
 
     let trace = catalog.load_session(ROOT_ID).await.unwrap();
     picker.install_session(trace);
-    assert_snapshot!("wide_browser", render_app(&picker, 140, 30));
-    assert_snapshot!("medium_browser", render_app(&picker, 96, 26));
-    assert_snapshot!("narrow_browser", render_app(&picker, 66, 24));
+    assert_snapshot!("wide_browser", render_app(&mut picker, 140, 30));
+    let Screen::Browser(browser) = &picker.screen else {
+        panic!("expected browser");
+    };
+    assert_eq!(
+        browser.cached_visible_row_count(),
+        browser.visible_rows().len()
+    );
+    assert!(browser.inspector_cached_line_count() <= 28);
+    assert_snapshot!("medium_browser", render_app(&mut picker, 96, 26));
+    assert_snapshot!("narrow_browser", render_app(&mut picker, 66, 24));
     assert_eq!(fs::read(root_path).unwrap(), before);
 }
 
@@ -168,14 +182,14 @@ async fn navigation_search_and_parent_keys_preserve_context() {
     for ch in "needle".chars() {
         app.handle_key(key(KeyCode::Char(ch)));
     }
-    assert_snapshot!("search_overlay", render_app(&app, 100, 25));
+    assert_snapshot!("search_overlay", render_app(&mut app, 100, 25));
     app.handle_key(key(KeyCode::Enter));
     let first_hit = selected_id(&app);
     app.handle_key(key(KeyCode::Char('n')));
     assert_ne!(selected_id(&app), first_hit);
     app.handle_key(key(KeyCode::Char('N')));
     assert_eq!(selected_id(&app), first_hit);
-    assert_snapshot!("search_navigation", render_app(&app, 100, 25));
+    assert_snapshot!("search_navigation", render_app(&mut app, 100, 25));
 }
 
 #[tokio::test]
@@ -212,16 +226,106 @@ async fn enter_requests_raw_payload_without_eagerly_reading_it() {
     let mut app = App::loading(None, false);
     app.install_session(trace);
     app.handle_key(key(KeyCode::Down));
-    assert_snapshot!("raw_payload_collapsed", render_app(&app, 100, 24));
+    assert_snapshot!("raw_payload_collapsed", render_app(&mut app, 100, 24));
     let AppAction::ReadPayload { id, handle, limit } = app.handle_key(key(KeyCode::Enter)) else {
         panic!("expected lazy raw payload request");
     };
-    app.install_payload(id.clone(), handle.read(limit).await);
+    let observed = handle.read(limit).await.unwrap();
+    app.install_payload(
+        id.clone(),
+        Ok(SanitizedPayload {
+            text: format!(
+                "{}TAIL-MUST-NOT-BE-EAGER",
+                "windowed payload\n".repeat(100_000)
+            ),
+            truncated: true,
+            original_bytes_read: observed.original_bytes_read,
+        }),
+    );
+    let Screen::Browser(browser) = &mut app.screen else {
+        panic!("expected browser");
+    };
+    browser.inspector_scroll = 20;
+    let large_render = render_app(&mut app, 100, 24);
+    assert!(!large_render.contains("TAIL-MUST-NOT-BE-EAGER"));
+    let Screen::Browser(browser) = &app.screen else {
+        panic!("expected browser");
+    };
+    assert!(browser.inspector_cached_line_count() <= 22);
     app.install_payload(id, Err(anyhow::anyhow!("bad \u{1b}[31m payload\u{7} path")));
-    let rendered = render_app(&app, 100, 24);
+    let rendered = render_app(&mut app, 100, 24);
     assert!(!rendered.contains('\u{1b}'));
     assert_snapshot!("raw_payload_failure_sanitized", rendered);
     assert_eq!(snapshot_files(&bundle), before);
+}
+
+#[tokio::test]
+#[ignore = "manual deterministic 100k-node responsiveness profile"]
+async fn profile_hundred_thousand_node_navigation() {
+    const EVENT_COUNT: usize = 100_000;
+    const WARM_ACTIONS: usize = 1_000;
+    const EXPANSION_ACTIONS: usize = 20;
+
+    let temp = TempDir::new().unwrap();
+    write_large_rollout(temp.path(), ROOT_ID, EVENT_COUNT);
+    let catalog = TraceRepository::new(temp.path().to_path_buf())
+        .discover()
+        .await;
+    let trace = catalog.load_session(ROOT_ID).await.unwrap();
+    assert_eq!(trace.nodes.len(), 100_000);
+
+    let build_started = Instant::now();
+    let mut browser = super::browser::BrowserState::new(trace);
+    let build_elapsed = build_started.elapsed();
+    assert!(browser.cached_visible_row_count() >= 2);
+
+    browser.move_vertical(1);
+    let expand_started = Instant::now();
+    browser.expand();
+    let expand_elapsed = expand_started.elapsed();
+    assert!(browser.cached_visible_row_count() > 50_000);
+
+    let mut samples = Vec::with_capacity(WARM_ACTIONS);
+    for _ in 0..WARM_ACTIONS {
+        let started = Instant::now();
+        browser.move_vertical(1);
+        samples.push(started.elapsed());
+    }
+    samples.sort_unstable();
+    let navigation_p95 = percentile_95(&samples);
+
+    browser.first();
+    browser.move_vertical(1);
+    let mut expansion_samples = Vec::with_capacity(EXPANSION_ACTIONS);
+    let mut collapse_samples = Vec::with_capacity(EXPANSION_ACTIONS);
+    for _ in 0..EXPANSION_ACTIONS {
+        let collapse_started = Instant::now();
+        browser.collapse_or_parent();
+        collapse_samples.push(collapse_started.elapsed());
+        let expansion_started = Instant::now();
+        browser.expand();
+        expansion_samples.push(expansion_started.elapsed());
+    }
+    expansion_samples.sort_unstable();
+    collapse_samples.sort_unstable();
+    let expansion_p95 = percentile_95(&expansion_samples);
+    let collapse_p95 = percentile_95(&collapse_samples);
+    eprintln!(
+        "trace-profile nodes=100000 build_ms={:.3} first_expand_ms={:.3} navigation_p95_ms={:.3} expansion_p95_ms={:.3} collapse_p95_ms={:.3}",
+        duration_ms(build_elapsed),
+        duration_ms(expand_elapsed),
+        duration_ms(navigation_p95),
+        duration_ms(expansion_p95),
+        duration_ms(collapse_p95),
+    );
+    assert!(
+        navigation_p95 < Duration::from_millis(50),
+        "warm navigation p95 was {navigation_p95:?}"
+    );
+    assert!(
+        expansion_p95 < Duration::from_millis(50),
+        "warm expansion p95 was {expansion_p95:?}"
+    );
 }
 
 fn snapshot_files(root: &Path) -> Vec<(std::path::PathBuf, Vec<u8>)> {
@@ -244,7 +348,7 @@ fn snapshot_files(root: &Path) -> Vec<(std::path::PathBuf, Vec<u8>)> {
     files
 }
 
-fn render_app(app: &App, width: u16, height: u16) -> String {
+fn render_app(app: &mut App, width: u16, height: u16) -> String {
     let backend = TestBackend::new(width, height);
     let mut terminal = Terminal::new(backend).unwrap();
     terminal.draw(|frame| render::render(frame, app)).unwrap();
@@ -323,4 +427,58 @@ fn write_rollout(
     )
     .unwrap();
     path
+}
+
+fn write_large_rollout(codex_home: &Path, id: &str, event_count: usize) {
+    let directory = codex_home.join("sessions/2026/07/25");
+    fs::create_dir_all(&directory).unwrap();
+    let path = directory.join(format!("rollout-2026-07-25T00-00-00-{id}.jsonl"));
+    let file = File::create(path).unwrap();
+    let mut writer = BufWriter::new(file);
+    serde_json::to_writer(
+        &mut writer,
+        &json!({
+            "timestamp": "2026-07-25T00:00:00Z",
+            "type": "session_meta",
+            "payload": {
+                "session_id": id,
+                "id": id,
+                "parent_thread_id": null,
+                "timestamp": "2026-07-25T00:00:00Z",
+                "cwd": "/synthetic/large-workspace",
+                "originator": "codex-trace-tui-profile",
+                "cli_version": "0.0.0",
+                "source": "cli",
+                "model_provider": "synthetic",
+                "base_instructions": null
+            }
+        }),
+    )
+    .unwrap();
+    writer.write_all(b"\n").unwrap();
+    for sequence in 0..event_count {
+        serde_json::to_writer(
+            &mut writer,
+            &json!({
+                "timestamp": "2026-07-25T00:00:01Z",
+                "type": "event_msg",
+                "payload": {
+                    "type": "user_message",
+                    "message": format!("synthetic event {sequence:06}"),
+                    "kind": "plain"
+                }
+            }),
+        )
+        .unwrap();
+        writer.write_all(b"\n").unwrap();
+    }
+    writer.flush().unwrap();
+}
+
+fn duration_ms(duration: Duration) -> f64 {
+    duration.as_secs_f64() * 1_000.0
+}
+
+fn percentile_95(samples: &[Duration]) -> Duration {
+    samples[(samples.len() * 95 / 100).min(samples.len() - 1)]
 }

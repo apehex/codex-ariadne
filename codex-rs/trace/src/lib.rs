@@ -5,12 +5,14 @@
 //! or otherwise mutates its input stores.
 
 mod catalog;
+mod index;
 mod model;
 mod payload;
 mod rich;
 mod search;
 
 pub use catalog::TraceRepository;
+pub use index::TraceIndex;
 pub use model::*;
 pub use payload::PayloadReadLimit;
 pub use payload::SafePayloadReader;
