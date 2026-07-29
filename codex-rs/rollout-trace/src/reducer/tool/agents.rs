@@ -22,6 +22,7 @@ use crate::model::InteractionEdgeKind;
 use crate::model::ToolCallKind;
 use crate::model::TraceAnchor;
 use crate::payload::RawPayloadRef;
+use crate::raw_event::RawEventSeq;
 
 /// Agent delivery edge waiting for the recipient-side conversation item.
 ///
@@ -38,6 +39,7 @@ pub(in crate::reducer) struct PendingAgentInteractionEdge {
     /// Spawn-only fallback for children that fail before their task message is model-visible.
     pub(in crate::reducer) unresolved_spawn_thread_id: Option<String>,
     pub(in crate::reducer) started_at_unix_ms: i64,
+    pub(in crate::reducer) started_seq: RawEventSeq,
     pub(in crate::reducer) ended_at_unix_ms: Option<i64>,
     pub(in crate::reducer) carried_raw_payload_ids: Vec<String>,
 }
@@ -48,6 +50,7 @@ pub(in crate::reducer) struct PendingAgentInteractionEdge {
 /// carry a parent-thread notification. This wrapper keeps the dispatcher from
 /// passing a positional bundle of thread and turn ids.
 pub(in crate::reducer) struct ObservedAgentResultEdge {
+    pub(in crate::reducer) seq: RawEventSeq,
     pub(in crate::reducer) wall_time_unix_ms: i64,
     pub(in crate::reducer) edge_id: String,
     pub(in crate::reducer) child_thread_id: String,
@@ -255,6 +258,7 @@ impl TraceReducer {
             format!("agent activity referenced unknown tool call {tool_call_id}")
         })?;
         let started_at_unix_ms = tool_call.execution.started_at_unix_ms;
+        let started_seq = tool_call.execution.started_seq;
         let message_author = self.agent_path_for_thread(&tool_call.thread_id)?;
         let message_content = self.agent_message_content_from_invocation(tool_call_id)?;
         let carried_raw_payload_ids = self.agent_tool_payload_ids(tool_call_id)?;
@@ -269,6 +273,7 @@ impl TraceReducer {
             message_content,
             unresolved_spawn_thread_id,
             started_at_unix_ms,
+            started_seq,
             ended_at_unix_ms: Some(wall_time_unix_ms),
             carried_raw_payload_ids,
         })
@@ -370,6 +375,7 @@ impl TraceReducer {
             message_content: payload.prompt.clone(),
             unresolved_spawn_thread_id: Some(child_thread_id),
             started_at_unix_ms: tool_call.execution.started_at_unix_ms,
+            started_seq: tool_call.execution.started_seq,
             ended_at_unix_ms: Some(wall_time_unix_ms),
             carried_raw_payload_ids: self.agent_tool_payload_ids(tool_call_id)?,
         })
@@ -412,6 +418,7 @@ impl TraceReducer {
             message_content,
             unresolved_spawn_thread_id: None,
             started_at_unix_ms: tool_call.execution.started_at_unix_ms,
+            started_seq: tool_call.execution.started_seq,
             ended_at_unix_ms,
             carried_raw_payload_ids: self.agent_tool_payload_ids(tool_call_id)?,
         })
@@ -447,13 +454,15 @@ impl TraceReducer {
             // than creating an anchor to a non-existent reduced object.
             return Ok(());
         }
-        let started_at_unix_ms = self
-            .rollout
-            .tool_calls
-            .get(tool_call_id)
-            .with_context(|| format!("close edge referenced unknown tool call {tool_call_id}"))?
-            .execution
-            .started_at_unix_ms;
+        let (started_at_unix_ms, started_seq) = {
+            let execution = &self
+                .rollout
+                .tool_calls
+                .get(tool_call_id)
+                .with_context(|| format!("close edge referenced unknown tool call {tool_call_id}"))?
+                .execution;
+            (execution.started_at_unix_ms, execution.started_seq)
+        };
         let carried_raw_payload_ids = self.agent_tool_payload_ids(tool_call_id)?;
         self.upsert_interaction_edge(InteractionEdge {
             edge_id: tool_edge_id(tool_call_id),
@@ -465,6 +474,7 @@ impl TraceReducer {
                 thread_id: target_thread_id,
             },
             started_at_unix_ms,
+            started_seq,
             ended_at_unix_ms,
             carried_item_ids: Vec::new(),
             carried_raw_payload_ids,
@@ -504,6 +514,7 @@ impl TraceReducer {
             message_content: observed.message,
             unresolved_spawn_thread_id: None,
             started_at_unix_ms: observed.wall_time_unix_ms,
+            started_seq: observed.seq,
             ended_at_unix_ms: Some(observed.wall_time_unix_ms),
             carried_raw_payload_ids: observed
                 .carried_payload
@@ -619,6 +630,7 @@ impl TraceReducer {
                     thread_id: child_thread_id,
                 },
                 started_at_unix_ms: pending.started_at_unix_ms,
+                started_seq: pending.started_seq,
                 ended_at_unix_ms: pending.ended_at_unix_ms,
                 carried_item_ids: Vec::new(),
                 carried_raw_payload_ids: pending.carried_raw_payload_ids,
@@ -640,6 +652,7 @@ impl TraceReducer {
                 item_id: target_item_id.clone(),
             },
             started_at_unix_ms: pending.started_at_unix_ms,
+            started_seq: pending.started_seq,
             ended_at_unix_ms: pending.ended_at_unix_ms,
             carried_item_ids: vec![target_item_id],
             carried_raw_payload_ids: pending.carried_raw_payload_ids,
@@ -658,6 +671,7 @@ impl TraceReducer {
                 );
             }
             existing.started_at_unix_ms = existing.started_at_unix_ms.min(edge.started_at_unix_ms);
+            existing.started_seq = existing.started_seq.min(edge.started_seq);
             existing.ended_at_unix_ms = match (existing.ended_at_unix_ms, edge.ended_at_unix_ms) {
                 (Some(existing_ended), Some(edge_ended)) => Some(existing_ended.max(edge_ended)),
                 (None, ended) | (ended, None) => ended,

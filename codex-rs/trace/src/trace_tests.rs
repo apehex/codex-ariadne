@@ -4,7 +4,11 @@ use std::path::PathBuf;
 
 use codex_rollout_trace::RawPayloadKind;
 use codex_rollout_trace::RawPayloadRef;
+use codex_rollout_trace::RawToolCallRequester;
+use codex_rollout_trace::RawTraceEventContext;
 use codex_rollout_trace::RawTraceEventPayload;
+use codex_rollout_trace::ToolCallKind;
+use codex_rollout_trace::ToolCallSummary;
 use codex_rollout_trace::TraceWriter;
 use pretty_assertions::assert_eq;
 use serde_json::json;
@@ -19,9 +23,10 @@ const GRANDCHILD_ID: &str = "019d0000-0000-7000-8000-000000000003";
 #[tokio::test]
 async fn ordinary_threads_form_a_searchable_tree_and_preserve_diagnostics() {
     let temp = TempDir::new().unwrap();
-    write_rollout(temp.path(), ROOT_ID, None, "hello from root", None);
+    write_rollout(temp.path(), ROOT_ID, ROOT_ID, None, "hello from root", None);
     write_rollout(
         temp.path(),
+        ROOT_ID,
         CHILD_ID,
         Some(ROOT_ID),
         "hello from child",
@@ -29,6 +34,7 @@ async fn ordinary_threads_form_a_searchable_tree_and_preserve_diagnostics() {
     );
     write_rollout(
         temp.path(),
+        ROOT_ID,
         GRANDCHILD_ID,
         Some(CHILD_ID),
         "hello from grandchild",
@@ -96,11 +102,32 @@ async fn ordinary_threads_form_a_searchable_tree_and_preserve_diagnostics() {
 #[tokio::test]
 async fn orphan_and_cycle_threads_remain_reachable_from_the_session() {
     let temp = TempDir::new().unwrap();
-    write_rollout(temp.path(), ROOT_ID, Some(CHILD_ID), "cycle a", None);
-    write_rollout(temp.path(), CHILD_ID, Some(ROOT_ID), "cycle b", None);
+    write_rollout(
+        temp.path(),
+        ROOT_ID,
+        ROOT_ID,
+        Some(CHILD_ID),
+        "cycle a",
+        None,
+    );
+    write_rollout(
+        temp.path(),
+        ROOT_ID,
+        CHILD_ID,
+        Some(ROOT_ID),
+        "cycle b",
+        None,
+    );
     let orphan_id = "019d0000-0000-7000-8000-000000000003";
     let missing_id = "019d0000-0000-7000-8000-000000000004";
-    write_rollout(temp.path(), orphan_id, Some(missing_id), "orphan", None);
+    write_rollout(
+        temp.path(),
+        ROOT_ID,
+        orphan_id,
+        Some(missing_id),
+        "orphan",
+        None,
+    );
 
     let catalog = TraceRepository::new(temp.path().to_path_buf())
         .discover()
@@ -116,26 +143,316 @@ async fn orphan_and_cycle_threads_remain_reachable_from_the_session() {
         );
     }
 
-    let orphan = catalog.load_session(missing_id).await.unwrap();
     let orphan_locator = TraceNodeLocator::new(
-        missing_id,
+        ROOT_ID,
         TraceNodeKind::Thread,
         format!("ordinary:{orphan_id}"),
     );
-    let orphan_session = TraceNodeLocator::new(missing_id, TraceNodeKind::Session, missing_id);
+    let orphan_session = TraceNodeLocator::new(ROOT_ID, TraceNodeKind::Session, ROOT_ID);
     assert_eq!(
-        orphan.node(&orphan_locator).unwrap().parent,
+        cycle.node(&orphan_locator).unwrap().parent,
         Some(orphan_session)
     );
-    assert!(orphan.nodes.iter().any(|node| {
+    assert!(cycle.nodes.iter().any(|node| {
         node.locator.kind == TraceNodeKind::Diagnostic && node.label.contains("parent rollout")
+    }));
+}
+
+#[tokio::test]
+async fn upstream_session_topology_keeps_lineage_distinct_from_containment() {
+    let temp = TempDir::new().unwrap();
+    write_rollout(temp.path(), ROOT_ID, ROOT_ID, None, "root", None);
+    write_rollout(temp.path(), ROOT_ID, CHILD_ID, Some(ROOT_ID), "child", None);
+    let child_path = temp.path().join(format!(
+        "sessions/2026/07/25/rollout-2026-07-25T00-00-00-{CHILD_ID}.jsonl"
+    ));
+    let mut child_lines = fs::read_to_string(&child_path)
+        .unwrap()
+        .lines()
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    let mut child_meta = serde_json::from_str::<serde_json::Value>(&child_lines[0]).unwrap();
+    child_meta["payload"]["forked_from_id"] = json!(GRANDCHILD_ID);
+    child_meta["payload"]["history_base"] = json!({
+        "thread_id": GRANDCHILD_ID,
+        "end_ordinal_exclusive": 7,
+        "end_byte_offset": 512,
+    });
+    child_lines[0] = child_meta.to_string();
+    fs::write(&child_path, format!("{}\n", child_lines.join("\n"))).unwrap();
+
+    write_rollout(
+        temp.path(),
+        GRANDCHILD_ID,
+        GRANDCHILD_ID,
+        None,
+        "independent fork",
+        None,
+    );
+
+    let catalog = TraceRepository::new(temp.path().to_path_buf())
+        .discover()
+        .await;
+    assert_eq!(
+        catalog
+            .sessions
+            .iter()
+            .map(|summary| summary.session_id.as_str())
+            .collect::<Vec<_>>(),
+        vec![ROOT_ID, GRANDCHILD_ID]
+    );
+
+    let trace = catalog.load_session(ROOT_ID).await.unwrap();
+    let child = trace
+        .node(&TraceNodeLocator::new(
+            ROOT_ID,
+            TraceNodeKind::Thread,
+            format!("ordinary:{CHILD_ID}"),
+        ))
+        .unwrap();
+    assert_eq!(
+        child.parent,
+        Some(TraceNodeLocator::new(
+            ROOT_ID,
+            TraceNodeKind::Thread,
+            format!("ordinary:{ROOT_ID}"),
+        ))
+    );
+    assert_eq!(child.detail["forked_from_thread_id"], json!(GRANDCHILD_ID));
+    assert_eq!(
+        child.detail["history_base"]["thread_id"],
+        json!(GRANDCHILD_ID)
+    );
+}
+
+#[tokio::test]
+async fn ordinary_records_follow_numeric_ordinals_despite_timestamp_regression() {
+    let temp = TempDir::new().unwrap();
+    write_rollout(temp.path(), ROOT_ID, ROOT_ID, None, "placeholder", None);
+    let path = temp.path().join(format!(
+        "sessions/2026/07/25/rollout-2026-07-25T00-00-00-{ROOT_ID}.jsonl"
+    ));
+    let records = [
+        json!({
+            "timestamp": "2026-07-20T00:00:00Z",
+            "ordinal": 1,
+            "type": "session_meta",
+            "payload": {
+                "session_id": ROOT_ID,
+                "id": ROOT_ID,
+                "timestamp": "2026-07-20T00:00:00Z",
+                "cwd": "/workspace",
+                "originator": "codex-trace-test",
+                "cli_version": "0.0.0",
+                "source": "cli",
+                "model_provider": "openai",
+                "base_instructions": null
+            }
+        }),
+        json!({
+            "timestamp": "2026-07-30T00:00:00Z",
+            "ordinal": 2,
+            "type": "event_msg",
+            "payload": {
+                "type": "user_message",
+                "message": "newer wall time",
+                "kind": "plain"
+            }
+        }),
+        json!({
+            "timestamp": "2026-07-20T00:00:01Z",
+            "ordinal": 10,
+            "type": "event_msg",
+            "payload": {
+                "type": "agent_message",
+                "message": "later causal event with old wall time"
+            }
+        }),
+    ];
+    fs::write(
+        path,
+        format!(
+            "{}\n",
+            records
+                .iter()
+                .map(serde_json::Value::to_string)
+                .collect::<Vec<_>>()
+                .join("\n")
+        ),
+    )
+    .unwrap();
+
+    let trace = TraceRepository::new(temp.path().to_path_buf())
+        .discover()
+        .await
+        .load_session(ROOT_ID)
+        .await
+        .unwrap();
+    let thread = TraceNodeLocator::new(
+        ROOT_ID,
+        TraceNodeKind::Thread,
+        format!("ordinary:{ROOT_ID}"),
+    );
+
+    assert_eq!(
+        trace
+            .children(&thread)
+            .map(|node| (node.locator.id.as_str(), node.timestamp.as_deref()))
+            .collect::<Vec<_>>(),
+        vec![
+            (
+                "ordinary:019d0000-0000-7000-8000-000000000001:1",
+                Some("2026-07-20T00:00:00Z"),
+            ),
+            (
+                "ordinary:019d0000-0000-7000-8000-000000000001:2",
+                Some("2026-07-30T00:00:00Z"),
+            ),
+            (
+                "ordinary:019d0000-0000-7000-8000-000000000001:10",
+                Some("2026-07-20T00:00:01Z"),
+            ),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn rich_turn_children_follow_raw_event_sequence_across_node_kinds() {
+    let temp = TempDir::new().unwrap();
+    let bundle = temp.path().join("rich/bundle");
+    let writer = TraceWriter::create(
+        &bundle,
+        "trace-causal".to_string(),
+        ROOT_ID.to_string(),
+        ROOT_ID.to_string(),
+    )
+    .unwrap();
+    writer
+        .append(RawTraceEventPayload::ThreadStarted {
+            thread_id: ROOT_ID.to_string(),
+            agent_path: "/root".to_string(),
+            metadata_payload: None,
+        })
+        .unwrap();
+    writer
+        .append(RawTraceEventPayload::CodexTurnStarted {
+            codex_turn_id: "turn-z".to_string(),
+            thread_id: ROOT_ID.to_string(),
+        })
+        .unwrap();
+    let request = writer
+        .write_json_payload(
+            RawPayloadKind::InferenceRequest,
+            &json!({
+                "input": [{
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "causal first"}]
+                }]
+            }),
+        )
+        .unwrap();
+    writer
+        .append(RawTraceEventPayload::InferenceStarted {
+            inference_call_id: "inference-z".to_string(),
+            thread_id: ROOT_ID.to_string(),
+            codex_turn_id: "turn-z".to_string(),
+            model: "gpt-test".to_string(),
+            provider_name: "synthetic".to_string(),
+            request_payload: request,
+        })
+        .unwrap();
+    writer
+        .append_with_context(
+            RawTraceEventContext {
+                thread_id: Some(ROOT_ID.to_string()),
+                codex_turn_id: Some("turn-z".to_string()),
+            },
+            RawTraceEventPayload::ToolCallStarted {
+                tool_call_id: "tool-a".to_string(),
+                model_visible_call_id: None,
+                code_mode_runtime_tool_id: None,
+                requester: RawToolCallRequester::Model,
+                kind: ToolCallKind::Other {
+                    name: "synthetic".to_string(),
+                },
+                summary: ToolCallSummary::Generic {
+                    label: "synthetic tool".to_string(),
+                    input_preview: None,
+                    output_preview: None,
+                },
+                invocation_payload: None,
+            },
+        )
+        .unwrap();
+    drop(writer);
+
+    let trace = TraceRepository::new(temp.path().to_path_buf())
+        .with_rich_bundle(bundle)
+        .discover()
+        .await
+        .load_session(ROOT_ID)
+        .await
+        .unwrap();
+    let turn = TraceNodeLocator::new(ROOT_ID, TraceNodeKind::Turn, "turn-z");
+
+    assert_eq!(
+        trace
+            .children(&turn)
+            .map(|node| (node.locator.kind, node.locator.id.as_str()))
+            .collect::<Vec<_>>(),
+        vec![
+            (TraceNodeKind::ConversationItem, "conversation_item:1",),
+            (TraceNodeKind::Inference, "inference-z"),
+            (TraceNodeKind::ToolCall, "tool-a"),
+        ],
+    );
+}
+
+#[tokio::test]
+async fn cross_session_parent_ids_do_not_merge_independent_sessions() {
+    let temp = TempDir::new().unwrap();
+    write_rollout(temp.path(), ROOT_ID, ROOT_ID, None, "first session", None);
+    write_rollout(
+        temp.path(),
+        GRANDCHILD_ID,
+        CHILD_ID,
+        Some(ROOT_ID),
+        "second session",
+        None,
+    );
+
+    let catalog = TraceRepository::new(temp.path().to_path_buf())
+        .discover()
+        .await;
+    assert_eq!(catalog.sessions.len(), 2);
+    let trace = catalog.load_session(GRANDCHILD_ID).await.unwrap();
+    let session = TraceNodeLocator::new(GRANDCHILD_ID, TraceNodeKind::Session, GRANDCHILD_ID);
+    let thread = TraceNodeLocator::new(
+        GRANDCHILD_ID,
+        TraceNodeKind::Thread,
+        format!("ordinary:{CHILD_ID}"),
+    );
+
+    assert_eq!(trace.node(&thread).unwrap().parent, Some(session));
+    assert!(trace.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("missing or belongs to another session")
     }));
 }
 
 #[tokio::test]
 async fn matching_ordinary_and_rich_sources_merge_without_node_loss() {
     let temp = TempDir::new().unwrap();
-    write_rollout(temp.path(), ROOT_ID, None, "ordinary evidence", None);
+    write_rollout(
+        temp.path(),
+        ROOT_ID,
+        ROOT_ID,
+        None,
+        "ordinary evidence",
+        None,
+    );
     let bundle = temp.path().join("rich/bundle");
     let writer = TraceWriter::create(
         &bundle,
@@ -181,7 +498,14 @@ async fn matching_ordinary_and_rich_sources_merge_without_node_loss() {
 #[tokio::test]
 async fn duplicate_ordinary_observations_are_retained_with_stable_parentage() {
     let temp = TempDir::new().unwrap();
-    write_rollout(temp.path(), ROOT_ID, None, "first observation", None);
+    write_rollout(
+        temp.path(),
+        ROOT_ID,
+        ROOT_ID,
+        None,
+        "first observation",
+        None,
+    );
     let source = temp.path().join(format!(
         "sessions/2026/07/25/rollout-2026-07-25T00-00-00-{ROOT_ID}.jsonl"
     ));
@@ -240,7 +564,7 @@ async fn duplicate_ordinary_observations_are_retained_with_stable_parentage() {
 #[tokio::test]
 async fn selected_session_materialization_is_bounded_and_visible_as_a_diagnostic() {
     let temp = TempDir::new().unwrap();
-    write_rollout(temp.path(), ROOT_ID, None, "bounded record", None);
+    write_rollout(temp.path(), ROOT_ID, ROOT_ID, None, "bounded record", None);
     let limits = TraceLimits {
         max_nodes_per_session: 3,
         ..TraceLimits::default()
@@ -305,7 +629,14 @@ async fn malformed_rich_spines_downgrade_surviving_semantic_nodes() {
 #[tokio::test]
 async fn mismatched_rich_root_is_a_conflicting_diagnostic() {
     let temp = TempDir::new().unwrap();
-    write_rollout(temp.path(), ROOT_ID, None, "ordinary evidence", None);
+    write_rollout(
+        temp.path(),
+        ROOT_ID,
+        ROOT_ID,
+        None,
+        "ordinary evidence",
+        None,
+    );
     let bundle = temp.path().join("rich/bundle");
     let writer = TraceWriter::create(
         &bundle,
@@ -513,6 +844,7 @@ async fn payload_reader_contains_paths_sanitizes_controls_and_caps_reads() {
 
 fn write_rollout(
     codex_home: &Path,
+    session_id: &str,
     id: &str,
     parent: Option<&str>,
     message: &str,
@@ -526,7 +858,7 @@ fn write_rollout(
             "timestamp": "2026-07-25T00:00:00Z",
             "type": "session_meta",
             "payload": {
-                "session_id": id,
+                "session_id": session_id,
                 "id": id,
                 "parent_thread_id": parent,
                 "timestamp": "2026-07-25T00:00:00Z",

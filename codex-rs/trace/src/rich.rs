@@ -6,6 +6,7 @@ use serde::Serialize;
 
 use crate::Admission;
 use crate::EvidenceGrade;
+use crate::SiblingOrder;
 use crate::TraceGraphBuilder;
 use crate::TraceNode;
 use crate::TraceNodeKind;
@@ -56,6 +57,7 @@ pub(crate) fn project_rich(
             locator(session_id, TraceNodeKind::Thread, id),
             Some(parent),
             Some(thread.execution.started_at_unix_ms.to_string()),
+            SiblingOrder::Timestamp(thread.execution.started_at_unix_ms),
             format!("thread {}", thread.agent_path),
             thread,
             semantic_evidence,
@@ -68,6 +70,7 @@ pub(crate) fn project_rich(
             locator(session_id, TraceNodeKind::Turn, id),
             Some(locator(session_id, TraceNodeKind::Thread, &turn.thread_id)),
             Some(turn.execution.started_at_unix_ms.to_string()),
+            SiblingOrder::Sequence(turn.execution.started_seq),
             format!("turn {id}"),
             turn,
             semantic_evidence,
@@ -84,6 +87,7 @@ pub(crate) fn project_rich(
             locator(session_id, TraceNodeKind::ConversationItem, id),
             Some(parent),
             Some(item.first_seen_at_unix_ms.to_string()),
+            SiblingOrder::Sequence(item.first_seen_seq),
             format!("conversation {:?}", item.kind),
             item,
             semantic_evidence,
@@ -100,6 +104,7 @@ pub(crate) fn project_rich(
                 &inference.codex_turn_id,
             )),
             Some(inference.execution.started_at_unix_ms.to_string()),
+            SiblingOrder::Sequence(inference.execution.started_seq),
             format!("inference {}", inference.model),
             inference,
             semantic_evidence,
@@ -116,6 +121,7 @@ pub(crate) fn project_rich(
             locator(session_id, TraceNodeKind::ToolCall, id),
             Some(parent),
             Some(tool.execution.started_at_unix_ms.to_string()),
+            SiblingOrder::Sequence(tool.execution.started_seq),
             format!("tool {:?}", tool.kind),
             tool,
             semantic_evidence,
@@ -132,6 +138,7 @@ pub(crate) fn project_rich(
                 &cell.codex_turn_id,
             )),
             Some(cell.execution.started_at_unix_ms.to_string()),
+            SiblingOrder::Sequence(cell.execution.started_seq),
             format!("code cell {id}"),
             cell,
             semantic_evidence,
@@ -145,6 +152,7 @@ pub(crate) fn project_rich(
             locator(session_id, TraceNodeKind::RawPayload, id),
             Some(session_locator.clone()),
             None,
+            SiblingOrder::Unspecified,
             format!("payload {:?}", reference.kind),
             reference,
             EvidenceGrade::Exact,
@@ -180,6 +188,7 @@ fn project_runtime_maps(
                 &compaction.codex_turn_id,
             )),
             Some(compaction.installed_at_unix_ms.to_string()),
+            SiblingOrder::Sequence(compaction.installed_seq),
             format!("compaction {id}"),
             compaction,
             semantic_evidence,
@@ -196,6 +205,7 @@ fn project_runtime_maps(
                 &request.compaction_id,
             )),
             Some(request.execution.started_at_unix_ms.to_string()),
+            SiblingOrder::Sequence(request.execution.started_seq),
             format!("compaction request {}", request.model),
             request,
             semantic_evidence,
@@ -212,6 +222,7 @@ fn project_runtime_maps(
                 &operation.tool_call_id,
             )),
             Some(operation.execution.started_at_unix_ms.to_string()),
+            SiblingOrder::Sequence(operation.execution.started_seq),
             format!("terminal operation {:?}", operation.kind),
             operation,
             semantic_evidence,
@@ -228,6 +239,7 @@ fn project_runtime_maps(
                 &terminal.created_by_operation_id,
             )),
             Some(terminal.execution.started_at_unix_ms.to_string()),
+            SiblingOrder::Sequence(terminal.execution.started_seq),
             format!("terminal {id}"),
             terminal,
             semantic_evidence,
@@ -240,6 +252,7 @@ fn project_runtime_maps(
             locator(session_id, TraceNodeKind::InteractionEdge, id),
             Some(session_locator.clone()),
             Some(edge.started_at_unix_ms.to_string()),
+            SiblingOrder::Timestamp(edge.started_at_unix_ms),
             format!("interaction {:?}", edge.kind),
             edge,
             semantic_evidence,
@@ -257,6 +270,7 @@ fn insert<T: Serialize>(
     locator: TraceNodeLocator,
     parent: Option<TraceNodeLocator>,
     timestamp: Option<String>,
+    sibling_order: SiblingOrder,
     label: String,
     value: &T,
     evidence: EvidenceGrade,
@@ -275,9 +289,9 @@ fn insert<T: Serialize>(
         detail,
     };
     Ok(match parent_admission {
-        ParentAdmission::Deferred => graph.admit(node, /*source_path*/ None),
+        ParentAdmission::Deferred => graph.admit(node, sibling_order, /*source_path*/ None),
         ParentAdmission::Required => {
-            graph.admit_with_required_parent(node, /*source_path*/ None)
+            graph.admit_with_required_parent(node, sibling_order, /*source_path*/ None)
         }
     })
 }

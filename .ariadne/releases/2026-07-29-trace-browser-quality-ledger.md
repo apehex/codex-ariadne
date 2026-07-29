@@ -27,11 +27,12 @@ Status: implementation evidence; cross-platform workflow results pending
 | --- | --- | --- |
 | `rollout-trace/reducer/bundle_path.rs` | Canonical relative regular-file containment for event logs and semantic payloads | `inspection_tests::replay_rejects_manifest_event_log_escape`, `semantic_payload_tests::rejects_oversized_and_escaping_payloads`, and Unix symlink tests |
 | `rollout-trace/reducer/inspection.rs` public metadata and replay types/functions | Manifest-selected event log, bounded records, invalid-record recovery, event limit, diagnostics | `inspection_tests.rs` custom-path, malformed, invalid UTF-8, oversized-followed-by-valid, and event-limit tests |
+| `rollout-trace/reducer/conversation.rs`, `compaction.rs`, and `tool/agents.rs` | First-observation raw sequence survives reduction for conversation items, compactions, and interaction edges | sequence assertions in `conversation_tests.rs` and `tool/agents_tests.rs` |
 | `rollout-trace/reducer/semantic_payload.rs` | Zero, exact, plus-one, invalid UTF-8, absolute, lexical, and symlink behavior | `semantic_payload_tests.rs` |
-| `trace/catalog.rs` repository builders, discovery, summaries, selection, and diagnostics | Ordinary, rich, merged, lazy discovery, malformed input, roots, cycles, conflicts, and selected-session bounds | `trace_tests.rs` |
-| `trace/graph.rs` admission types and methods | Zero, exact, plus-one, missing parent, duplicate preservation, conflicting evidence, and repeated-parent remapping | `graph_tests.rs` |
-| `trace/ordinary.rs` bounded reader and projection | Exact and oversized-followed-by-valid line behavior plus ordinary integration trees | `ordinary_tests.rs` and `trace_tests.rs` |
-| `trace/rich.rs` rich projection helpers | Parent validation, semantic evidence downgrade, raw payload handles, and merged integration | `rich_tests.rs` and rich cases in `trace_tests.rs`; broader semantic-family depth remains pending |
+| `trace/catalog.rs` repository builders, discovery, summaries, selection, and diagnostics | Upstream `session_id` grouping, ordinary/rich merging, lazy discovery, malformed input, roots, cycles, lineage metadata, conflicts, and selected-session bounds | `trace_tests.rs` |
+| `trace/graph.rs` admission types and methods | Zero, exact, plus-one, missing parent, duplicate preservation, conflicting evidence, repeated-parent remapping, and cross-kind causal sibling order | `graph_tests.rs` |
+| `trace/ordinary.rs` bounded reader and projection | Same-session containment, cross-session/missing/cyclic parent fallback, numeric ordinal ordering under regressing timestamps, and bounded-line behavior | `ordinary_tests.rs` and `trace_tests.rs` |
+| `trace/rich.rs` rich projection helpers | Parent validation, raw-event causal ordering across semantic families, semantic evidence downgrade, raw payload handles, and merged integration | `rich_tests.rs` and rich cases in `trace_tests.rs`; broader semantic-family depth remains pending |
 | `trace/presentation.rs` presentation constructor, classifiers, decoders, sanitizers, and bounded documents | Role/channel/class selection, interpreted newlines, terminal controls, and UTF-8 bounds | `presentation_tests.rs` |
 | `trace/index.rs` index type and lookup/traversal methods | Stable ordering, locator lookup, roots, children, compact positions, and rebuild behavior | `index_tests.rs` |
 | `trace/search.rs` search functions and match type | Attribution, hit/field/character exact limits, UTF-8, JSON pointers, controls, ASCII case behavior, and empty queries | `search_tests.rs` |
@@ -61,11 +62,11 @@ Status: implementation evidence; cross-platform workflow results pending
 ## Local validation
 
 - `just test -p codex-rollout-trace`: 74 passed.
-- `just test -p codex-trace`: 30 passed.
+- `just test -p codex-trace`: 35 passed.
 - `just test -p codex-trace-tui`: 12 passed and one profile test skipped by default.
-- `just test -p codex-trace-tui profile_hundred_thousand_node_navigation -- --ignored --nocapture`: passed with 100,000 nodes, 323.096 ms index construction, 2.578 ms first entry, 0.000 ms warm navigation p95, 4.921 ms warm level-entry p95, and 0.096 ms warm return p95.
+- `just test -p codex-trace-tui profile_hundred_thousand_node_navigation -- --ignored --nocapture`: passed with 100,000 nodes, 211.280 ms index construction, 1.792 ms first entry, 0.000 ms warm navigation p95, 1.820 ms warm level-entry p95, and 0.012 ms warm return p95.
 - The focused `codex-cli` parser tests passed, including the compatibility assertion that `codex -- trace` remains the literal interactive prompt while `codex trace` selects the browser command.
 - `cargo insta pending-snapshots --manifest-path trace-tui/Cargo.toml` reported no pending snapshots.
 - `PYTHONPYCACHEPREFIX=/tmp/ariadne-quality-pycache python -m py_compile .ariadne/demo/demo.py` passed.
 - `just fix -p codex-rollout-trace` and `just fix -p codex-trace -p codex-trace-tui -p codex-cli` passed, followed by `just fmt`.
-- The repository-wide argument-comment Bazel target enumeration is currently blocked by the pre-existing unsupported `binary_test_target_compatible_with` attribute in `codex-rs/windows-sandbox-rs/BUILD.bazel`. The packaged scoped fallback is also blocked because its pinned Rust 1.92 nightly cannot compile the workspace's `sqlx` 0.9, which requires Rust 1.94. This is a validation-infrastructure gap rather than a trace-browser lint finding.
+- `just argument-comment-lint` now starts successfully with Bazelisk, so the former target-enumeration blocker is resolved. Its first local build was stopped after 2,736 seconds at 13,680 of 17,426 actions because it was compiling the unrelated V8/toolchain graph; no argument-comment result was produced, and the focused CI lint remains the completion path.

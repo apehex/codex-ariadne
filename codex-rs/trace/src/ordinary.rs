@@ -9,10 +9,12 @@ use std::io::Read;
 use std::path::Path;
 use std::path::PathBuf;
 
+use chrono::DateTime;
 use codex_protocol::protocol::RolloutItem;
 
 use crate::Admission;
 use crate::EvidenceGrade;
+use crate::SiblingOrder;
 use crate::TraceDiagnostic;
 use crate::TraceGraphBuilder;
 use crate::TraceLimits;
@@ -32,19 +34,24 @@ pub(crate) async fn load_thread(
     graph: &mut TraceGraphBuilder,
 ) {
     let base_thread_locator = thread_locator(session_id, &thread.thread_id);
-    let parent = thread
-        .parent_thread_id
-        .as_ref()
-        .filter(|_| parent_is_reachable(thread, ordinary_threads))
-        .map(|id| thread_locator(session_id, id))
-        .unwrap_or_else(|| session_locator.clone());
+    let parent = match valid_parent_id(thread, ordinary_threads) {
+        Ok(Some(parent_id)) => thread_locator(session_id, parent_id),
+        Ok(None) => session_locator.clone(),
+        Err(message) => {
+            graph.record_diagnostic(path_diagnostic(&thread.path, message));
+            session_locator.clone()
+        }
+    };
     let thread_detail = serde_json::json!({
+        "session_id": thread.session_id,
         "thread_id": thread.thread_id,
         "path": thread.path,
         "cwd": thread.cwd,
         "model_provider": thread.model_provider,
         "archived": thread.archived,
         "original_parent_thread_id": thread.parent_thread_id,
+        "forked_from_thread_id": thread.forked_from_thread_id,
+        "history_base": thread.history_base,
     });
     let admission = graph.admit(
         TraceNode {
@@ -60,6 +67,7 @@ pub(crate) async fn load_thread(
             ),
             detail: thread_detail,
         },
+        thread_start_order(&thread.timestamp),
         Some(&thread.path),
     );
     let Admission::Retained(thread_locator) = admission else {
@@ -160,29 +168,55 @@ pub(crate) async fn load_thread(
                 presentation: crate::TraceRecordPresentation::from_detail(kind, &value),
                 detail: value,
             },
+            SiblingOrder::Sequence(ordinal),
             Some(&thread.path),
         );
     }
 }
 
-/// Returns whether an ordinary parent chain terminates without gaps or cycles.
-fn parent_is_reachable(thread: &OrdinaryThread, threads: &[OrdinaryThread]) -> bool {
+/// Resolves a same-session containment parent while rejecting gaps and cycles.
+fn valid_parent_id<'a>(
+    thread: &'a OrdinaryThread,
+    threads: &'a [OrdinaryThread],
+) -> Result<Option<&'a str>, String> {
+    let Some(parent_id) = thread.parent_thread_id.as_deref() else {
+        return Ok(None);
+    };
     let by_id = threads
         .iter()
         .map(|thread| (thread.thread_id.as_str(), thread))
         .collect::<BTreeMap<_, _>>();
-    let mut next = thread.parent_thread_id.as_deref();
+    let mut next = Some(parent_id);
     let mut seen = BTreeSet::new();
     while let Some(id) = next {
         if !seen.insert(id) {
-            return false;
+            return Err(format!(
+                "parent cycle at {id}; attached thread {} to session {}",
+                thread.thread_id, thread.session_id
+            ));
         }
         let Some(parent) = by_id.get(id) else {
-            return false;
+            return Err(format!(
+                "parent rollout {id} is missing or belongs to another session; attached thread {} to session {}",
+                thread.thread_id, thread.session_id
+            ));
+        };
+        if parent.session_id != thread.session_id {
+            return Err(format!(
+                "parent rollout {id} belongs to session {}; attached thread {} to session {}",
+                parent.session_id, thread.thread_id, thread.session_id
+            ));
         };
         next = parent.parent_thread_id.as_deref();
     }
-    true
+    Ok(Some(parent_id))
+}
+
+/// Converts an upstream RFC 3339 thread start into a sortable session-level position.
+fn thread_start_order(timestamp: &str) -> SiblingOrder {
+    DateTime::parse_from_rfc3339(timestamp).map_or(SiblingOrder::Unspecified, |timestamp| {
+        SiblingOrder::Timestamp(timestamp.timestamp_millis())
+    })
 }
 
 /// Maps a typed ordinary record to its normalized kind and label.

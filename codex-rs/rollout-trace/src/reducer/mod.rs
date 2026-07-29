@@ -470,6 +470,7 @@ impl TraceReducer {
                     );
                 };
                 self.reduce_compaction_installed_event(
+                    event.seq,
                     event.wall_time_unix_ms,
                     thread_id,
                     codex_turn_id,
@@ -486,6 +487,7 @@ impl TraceReducer {
                 carried_payload,
             } => {
                 self.queue_agent_result_interaction_edge(ObservedAgentResultEdge {
+                    seq: event.seq,
                     wall_time_unix_ms: event.wall_time_unix_ms,
                     edge_id,
                     child_thread_id,

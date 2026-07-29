@@ -22,6 +22,7 @@ use crate::model::ConversationRole;
 use crate::model::InferenceCallId;
 use crate::model::ProducerRef;
 use crate::payload::RawPayloadRef;
+use crate::raw_event::RawEventSeq;
 
 mod normalize;
 
@@ -33,6 +34,7 @@ impl TraceReducer {
     /// items remain distinct.
     pub(super) fn reduce_inference_request(
         &mut self,
+        seq: RawEventSeq,
         wall_time_unix_ms: i64,
         inference_call_id: &InferenceCallId,
         thread_id: &str,
@@ -94,6 +96,7 @@ impl TraceReducer {
                 ReconcileItems {
                     thread_id,
                     codex_turn_id,
+                    seq,
                     wall_time_unix_ms,
                     produced_by: Vec::new(),
                     start_index: item_ids.len(),
@@ -109,6 +112,7 @@ impl TraceReducer {
                 ReconcileItems {
                     thread_id,
                     codex_turn_id,
+                    seq,
                     wall_time_unix_ms,
                     produced_by: Vec::new(),
                     start_index: 0,
@@ -131,6 +135,7 @@ impl TraceReducer {
     /// Reduces an inference response payload into conversation items produced by the call.
     pub(super) fn reduce_inference_response(
         &mut self,
+        seq: RawEventSeq,
         wall_time_unix_ms: i64,
         inference_call_id: &InferenceCallId,
         response_payload: &RawPayloadRef,
@@ -164,6 +169,7 @@ impl TraceReducer {
             ReconcileItems {
                 thread_id: &thread_id,
                 codex_turn_id: &codex_turn_id,
+                seq,
                 wall_time_unix_ms,
                 produced_by: vec![ProducerRef::Inference {
                     inference_call_id: inference_call_id.clone(),
@@ -219,6 +225,7 @@ impl TraceReducer {
                             self.create_conversation_item(
                                 context.thread_id,
                                 Some(context.codex_turn_id.to_string()),
+                                context.seq,
                                 context.wall_time_unix_ms,
                                 item,
                                 context.produced_by.clone(),
@@ -239,6 +246,7 @@ impl TraceReducer {
                         self.create_conversation_item(
                             context.thread_id,
                             Some(context.codex_turn_id.to_string()),
+                            context.seq,
                             context.wall_time_unix_ms,
                             item,
                             context.produced_by.clone(),
@@ -248,6 +256,7 @@ impl TraceReducer {
                 self.create_conversation_item(
                     context.thread_id,
                     Some(context.codex_turn_id.to_string()),
+                    context.seq,
                     context.wall_time_unix_ms,
                     item,
                     context.produced_by.clone(),
@@ -282,6 +291,7 @@ impl TraceReducer {
     /// and the snapshot that future full requests should reconcile against.
     pub(super) fn reduce_compaction_checkpoint(
         &mut self,
+        seq: RawEventSeq,
         wall_time_unix_ms: i64,
         thread_id: &str,
         codex_turn_id: &str,
@@ -306,6 +316,7 @@ impl TraceReducer {
             DetachedReconcileItems {
                 thread_id,
                 codex_turn_id,
+                seq,
                 wall_time_unix_ms,
                 produced_by: Vec::new(),
                 candidates: input_candidates,
@@ -317,6 +328,7 @@ impl TraceReducer {
         let marker_item_id = self.create_conversation_item(
             thread_id,
             Some(codex_turn_id.to_string()),
+            seq,
             wall_time_unix_ms,
             NormalizedConversationItem {
                 role: ConversationRole::Assistant,
@@ -337,6 +349,7 @@ impl TraceReducer {
             DetachedReconcileItems {
                 thread_id,
                 codex_turn_id,
+                seq,
                 wall_time_unix_ms,
                 produced_by: vec![ProducerRef::Compaction {
                     compaction_id: compaction_id.clone(),
@@ -373,6 +386,7 @@ impl TraceReducer {
                     self.create_conversation_item(
                         context.thread_id,
                         Some(context.codex_turn_id.to_string()),
+                        context.seq,
                         context.wall_time_unix_ms,
                         item,
                         context.produced_by.clone(),
@@ -405,6 +419,7 @@ impl TraceReducer {
         &mut self,
         thread_id: &str,
         codex_turn_id: Option<String>,
+        first_seen_seq: RawEventSeq,
         first_seen_at_unix_ms: i64,
         item: NormalizedConversationItem,
         produced_by: Vec<ProducerRef>,
@@ -417,6 +432,7 @@ impl TraceReducer {
                 thread_id: thread_id.to_string(),
                 codex_turn_id,
                 first_seen_at_unix_ms,
+                first_seen_seq,
                 role: item.role,
                 channel: item.channel,
                 kind: item.kind,
@@ -528,6 +544,7 @@ enum ReconcileMode {
 struct ReconcileItems<'a> {
     thread_id: &'a str,
     codex_turn_id: &'a str,
+    seq: RawEventSeq,
     wall_time_unix_ms: i64,
     produced_by: Vec<ProducerRef>,
     start_index: usize,
@@ -538,6 +555,7 @@ struct ReconcileItems<'a> {
 struct DetachedReconcileItems<'a> {
     thread_id: &'a str,
     codex_turn_id: &'a str,
+    seq: RawEventSeq,
     wall_time_unix_ms: i64,
     produced_by: Vec<ProducerRef>,
     candidates: Vec<String>,

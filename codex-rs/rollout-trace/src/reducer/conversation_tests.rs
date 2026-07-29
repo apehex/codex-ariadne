@@ -63,6 +63,13 @@ fn request_snapshots_reuse_history_without_deduping_new_identical_items() -> any
         rollout.threads["thread-root"].conversation_item_ids,
         *second
     );
+    assert_eq!(
+        second
+            .iter()
+            .map(|item_id| rollout.conversation_items[item_id].first_seen_seq)
+            .collect::<Vec<_>>(),
+        vec![3, 5, 5],
+    );
 
     Ok(())
 }
@@ -105,6 +112,15 @@ fn response_outputs_enter_thread_conversation_on_completion() -> anyhow::Result<
     assert_eq!(
         rollout.threads["thread-root"].conversation_item_ids,
         expected_thread_items,
+    );
+    assert_eq!(
+        inference
+            .request_item_ids
+            .iter()
+            .chain(&inference.response_item_ids)
+            .map(|item_id| rollout.conversation_items[item_id].first_seen_seq)
+            .collect::<Vec<_>>(),
+        vec![3, 4],
     );
 
     Ok(())
@@ -927,6 +943,16 @@ fn compaction_boundary_repeats_prefix_and_reuses_replacement_items() -> anyhow::
         compaction.replacement_item_ids.as_slice()
     );
     let marker = &rollout.conversation_items[&compaction.marker_item_id];
+    assert_eq!(compaction.installed_seq, 4);
+    assert_eq!(marker.first_seen_seq, compaction.installed_seq);
+    assert_eq!(
+        compaction
+            .replacement_item_ids
+            .iter()
+            .map(|item_id| rollout.conversation_items[item_id].first_seen_seq)
+            .collect::<Vec<_>>(),
+        vec![compaction.installed_seq; 3],
+    );
     assert_eq!(marker.kind, ConversationItemKind::CompactionMarker);
     assert_eq!(marker.body.parts, Vec::<ConversationPart>::new());
     assert_eq!(

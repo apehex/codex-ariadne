@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::collections::BTreeSet;
 use std::path::Path;
 use std::path::PathBuf;
 
@@ -12,6 +11,7 @@ use codex_rollout::SESSIONS_SUBDIR;
 use crate::EvidenceGrade;
 use crate::SessionSummary;
 use crate::SessionTrace;
+use crate::SiblingOrder;
 use crate::TraceCapabilities;
 use crate::TraceCatalog;
 use crate::TraceDiagnostic;
@@ -70,7 +70,7 @@ impl TraceRepository {
     /// Discovers trace metadata without writing indexes or repairing source files.
     pub async fn discover(&self) -> TraceCatalog {
         let mut diagnostics = Vec::new();
-        let mut threads = BTreeMap::<String, OrdinaryThread>::new();
+        let mut threads = BTreeMap::<(String, String), OrdinaryThread>::new();
         let mut ordinary_observations = Vec::new();
         for (root, archived) in &self.ordinary_roots {
             for path in discover_files(
@@ -83,17 +83,23 @@ impl TraceRepository {
             {
                 match codex_rollout::read_session_meta_line(&path).await {
                     Ok(line) => {
-                        let thread_id = line.meta.id.to_string();
+                        let meta = line.meta;
+                        let session_id = meta.session_id.to_string();
+                        let thread_id = meta.id.to_string();
                         let thread = OrdinaryThread {
                             path: path.clone(),
+                            session_id: session_id.clone(),
                             thread_id: thread_id.clone(),
-                            parent_thread_id: line.meta.parent_thread_id.map(|id| id.to_string()),
-                            timestamp: line.meta.timestamp,
-                            cwd: line.meta.cwd,
-                            model_provider: line.meta.model_provider,
+                            parent_thread_id: meta.parent_thread_id.map(|id| id.to_string()),
+                            forked_from_thread_id: meta.forked_from_id.map(|id| id.to_string()),
+                            history_base: meta.history_base,
+                            timestamp: meta.timestamp,
+                            cwd: meta.cwd,
+                            model_provider: meta.model_provider,
                             archived: *archived,
                         };
-                        if let Some(previous) = threads.get(&thread_id)
+                        let identity = (session_id, thread_id.clone());
+                        if let Some(previous) = threads.get(&identity)
                             && !same_ordinary_observation(previous, &thread)
                         {
                             diagnostics.push(TraceDiagnostic {
@@ -106,7 +112,7 @@ impl TraceRepository {
                                 ),
                             });
                         }
-                        threads.entry(thread_id).or_insert_with(|| thread.clone());
+                        threads.entry(identity).or_insert_with(|| thread.clone());
                         ordinary_observations.push(thread);
                     }
                     Err(error) => diagnostics.push(TraceDiagnostic {
@@ -121,9 +127,8 @@ impl TraceRepository {
 
         let mut entries = BTreeMap::<String, CatalogEntry>::new();
         for thread in &ordinary_observations {
-            let root_id = resolve_root(thread, &threads, &mut diagnostics);
             entries
-                .entry(root_id)
+                .entry(thread.session_id.clone())
                 .or_default()
                 .ordinary
                 .push(thread.clone());
@@ -257,6 +262,7 @@ impl TraceCatalog {
                 ),
                 detail: session_detail,
             },
+            SiblingOrder::Unspecified,
             /*source_path*/ None,
         );
         if graph.is_empty() {
@@ -351,6 +357,7 @@ impl TraceCatalog {
                     ),
                     detail,
                 },
+                SiblingOrder::Unspecified,
                 diagnostic.path.as_deref(),
             );
         }
@@ -368,7 +375,13 @@ fn summarize(session_id: &str, entry: &CatalogEntry) -> SessionSummary {
     let ordinary_root = entry
         .ordinary
         .iter()
-        .find(|thread| thread.parent_thread_id.is_none())
+        .find(|thread| thread.thread_id == session_id)
+        .or_else(|| {
+            entry
+                .ordinary
+                .iter()
+                .find(|thread| thread.parent_thread_id.is_none())
+        })
         .or_else(|| entry.ordinary.first());
     let source = match (entry.ordinary.is_empty(), !entry.rich.is_empty()) {
         (false, false) => TraceSourceKind::Ordinary,
@@ -413,38 +426,6 @@ fn rich_status(status: &codex_rollout_trace::RolloutStatus) -> TraceStatus {
         codex_rollout_trace::RolloutStatus::Failed => TraceStatus::Failed,
         codex_rollout_trace::RolloutStatus::Aborted => TraceStatus::Aborted,
     }
-}
-
-fn resolve_root(
-    thread: &OrdinaryThread,
-    threads: &BTreeMap<String, OrdinaryThread>,
-    diagnostics: &mut Vec<TraceDiagnostic>,
-) -> String {
-    let mut current = thread;
-    let mut seen = BTreeSet::new();
-    while let Some(parent_id) = &current.parent_thread_id {
-        if !seen.insert(current.thread_id.clone()) {
-            let root = seen
-                .iter()
-                .next()
-                .cloned()
-                .unwrap_or_else(|| thread.thread_id.clone());
-            diagnostics.push(path_diagnostic(
-                &thread.path,
-                format!("parent cycle detected; grouped under {root}"),
-            ));
-            return root;
-        }
-        let Some(parent) = threads.get(parent_id) else {
-            diagnostics.push(path_diagnostic(
-                &thread.path,
-                format!("parent rollout {parent_id} is missing"),
-            ));
-            return parent_id.clone();
-        };
-        current = parent;
-    }
-    current.thread_id.clone()
 }
 
 async fn discover_files(
@@ -567,8 +548,11 @@ fn diagnostic_provenance(diagnostic: &TraceDiagnostic, entry: &CatalogEntry) -> 
 
 /// Compares ordinary trace metadata while ignoring the duplicate source path.
 fn same_ordinary_observation(left: &OrdinaryThread, right: &OrdinaryThread) -> bool {
-    left.thread_id == right.thread_id
+    left.session_id == right.session_id
+        && left.thread_id == right.thread_id
         && left.parent_thread_id == right.parent_thread_id
+        && left.forked_from_thread_id == right.forked_from_thread_id
+        && left.history_base == right.history_base
         && left.timestamp == right.timestamp
         && left.cwd == right.cwd
         && left.model_provider == right.model_provider

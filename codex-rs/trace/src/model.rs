@@ -495,8 +495,11 @@ impl RawPayloadHandle {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct OrdinaryThread {
     pub path: PathBuf,
+    pub session_id: String,
     pub thread_id: String,
     pub parent_thread_id: Option<String>,
+    pub forked_from_thread_id: Option<String>,
+    pub history_base: Option<codex_protocol::protocol::HistoryPosition>,
     pub timestamp: String,
     pub cwd: PathBuf,
     pub model_provider: Option<String>,

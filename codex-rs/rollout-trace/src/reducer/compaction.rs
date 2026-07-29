@@ -116,6 +116,7 @@ impl TraceReducer {
     /// thread history; request attempts alone do not imply that change.
     pub(super) fn reduce_compaction_installed_event(
         &mut self,
+        seq: RawEventSeq,
         wall_time_unix_ms: i64,
         thread_id: String,
         codex_turn_id: String,
@@ -138,6 +139,7 @@ impl TraceReducer {
             );
         }
         let checkpoint = self.reduce_compaction_checkpoint(
+            seq,
             wall_time_unix_ms,
             &thread_id,
             codex_turn_id.as_str(),
@@ -161,6 +163,7 @@ impl TraceReducer {
                 thread_id,
                 codex_turn_id,
                 installed_at_unix_ms: wall_time_unix_ms,
+                installed_seq: seq,
                 marker_item_id: checkpoint.marker_item_id,
                 request_ids,
                 input_item_ids: checkpoint.input_item_ids,

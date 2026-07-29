@@ -18,6 +18,7 @@ mod search;
 
 pub use catalog::TraceRepository;
 pub(crate) use graph::Admission;
+pub(crate) use graph::SiblingOrder;
 pub(crate) use graph::TraceGraphBuilder;
 pub use index::TraceIndex;
 pub use model::EvidenceGrade;

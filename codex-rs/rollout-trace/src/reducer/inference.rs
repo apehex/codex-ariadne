@@ -68,6 +68,7 @@ impl TraceReducer {
         }
 
         let request_item_ids = self.reduce_inference_request(
+            seq,
             wall_time_unix_ms,
             &inference_call_id,
             &thread_id,
@@ -193,7 +194,7 @@ impl TraceReducer {
         let response_item_ids = response_payload
             .as_ref()
             .map(|payload| {
-                self.reduce_inference_response(wall_time_unix_ms, &inference_call_id, payload)
+                self.reduce_inference_response(seq, wall_time_unix_ms, &inference_call_id, payload)
             })
             .transpose()?;
         {

@@ -124,6 +124,10 @@ fn spawn_runtime_payload_targets_delivered_child_message() -> anyhow::Result<()>
     let edge = &replayed.interaction_edges["edge:spawn:019d0000-0000-7000-8000-000000000001:019d0000-0000-7000-8000-000000000002"];
     assert_eq!(edge.kind, InteractionEdgeKind::SpawnAgent);
     assert_eq!(
+        edge.started_seq,
+        replayed.tool_calls["call-spawn"].execution.started_seq,
+    );
+    assert_eq!(
         edge.source,
         TraceAnchor::ToolCall {
             tool_call_id: "call-spawn".to_string()

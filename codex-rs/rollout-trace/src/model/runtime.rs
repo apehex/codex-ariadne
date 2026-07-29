@@ -81,6 +81,8 @@ pub struct Compaction {
     pub thread_id: AgentThreadId,
     pub codex_turn_id: CodexTurnId,
     pub installed_at_unix_ms: i64,
+    /// Raw event sequence at which the replacement history was installed.
+    pub installed_seq: RawEventSeq,
     /// Structural conversation item marking where pre-compaction history ended.
     pub marker_item_id: ConversationItemId,
     /// Upstream compaction request attempts that contributed to this checkpoint.
@@ -308,6 +310,8 @@ pub struct InteractionEdge {
     pub source: TraceAnchor,
     pub target: TraceAnchor,
     pub started_at_unix_ms: i64,
+    /// Earliest raw event sequence contributing to this interaction.
+    pub started_seq: RawEventSeq,
     pub ended_at_unix_ms: Option<i64>,
     pub carried_item_ids: Vec<ConversationItemId>,
     pub carried_raw_payload_ids: Vec<RawPayloadId>,

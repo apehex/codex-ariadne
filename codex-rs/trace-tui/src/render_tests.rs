@@ -104,9 +104,16 @@ fn trace_root_validation_rejects_missing_and_regular_files() {
 #[tokio::test]
 async fn picker_and_adaptive_browser_have_stable_snapshots() {
     let temp = TempDir::new().unwrap();
-    let root_path = write_rollout(temp.path(), ROOT_ID, /*parent*/ None, "root needle");
+    let root_path = write_rollout(
+        temp.path(),
+        ROOT_ID,
+        ROOT_ID,
+        /*parent*/ None,
+        "root needle",
+    );
     write_rollout(
         temp.path(),
+        ROOT_ID,
         CHILD_ID,
         /*parent*/ Some(ROOT_ID),
         "child needle",
@@ -162,9 +169,16 @@ async fn picker_and_adaptive_browser_have_stable_snapshots() {
 #[tokio::test]
 async fn navigation_search_and_parent_keys_preserve_context() {
     let temp = TempDir::new().unwrap();
-    write_rollout(temp.path(), ROOT_ID, /*parent*/ None, "root needle");
     write_rollout(
         temp.path(),
+        ROOT_ID,
+        ROOT_ID,
+        /*parent*/ None,
+        "root needle",
+    );
+    write_rollout(
+        temp.path(),
+        ROOT_ID,
         CHILD_ID,
         /*parent*/ Some(ROOT_ID),
         "child needle",
@@ -219,6 +233,7 @@ async fn detail_modes_filters_and_help_have_stable_snapshots() {
     write_rollout(
         temp.path(),
         ROOT_ID,
+        ROOT_ID,
         /*parent*/ None,
         "first line\nsecond line with **markdown**",
     );
@@ -263,7 +278,13 @@ async fn detail_modes_filters_and_help_have_stable_snapshots() {
 #[tokio::test]
 async fn view_options_control_columns_headers_and_previews() {
     let temp = TempDir::new().unwrap();
-    write_rollout(temp.path(), ROOT_ID, /*parent*/ None, "PREVIEW-TOKEN");
+    write_rollout(
+        temp.path(),
+        ROOT_ID,
+        ROOT_ID,
+        /*parent*/ None,
+        "PREVIEW-TOKEN",
+    );
     let catalog = TraceRepository::new(temp.path().to_path_buf())
         .discover()
         .await;
@@ -293,6 +314,7 @@ async fn stale_detail_render_cannot_replace_a_newer_content_mode() {
     let temp = TempDir::new().unwrap();
     write_rollout(
         temp.path(),
+        ROOT_ID,
         ROOT_ID,
         /*parent*/ None,
         "semantic content",
@@ -330,6 +352,7 @@ async fn all_record_search_temporarily_reveals_a_filtered_hit() {
     write_rollout(
         temp.path(),
         ROOT_ID,
+        ROOT_ID,
         /*parent*/ None,
         "visible user content",
     );
@@ -365,6 +388,7 @@ async fn stale_search_result_cannot_replace_a_newer_query() {
     let temp = TempDir::new().unwrap();
     write_rollout(
         temp.path(),
+        ROOT_ID,
         ROOT_ID,
         /*parent*/ None,
         "first needle second",
@@ -659,6 +683,7 @@ fn move_to_kind(app: &mut App, kind: TraceNodeKind) {
 
 fn write_rollout(
     codex_home: &Path,
+    session_id: &str,
     id: &str,
     parent: Option<&str>,
     message: &str,
@@ -671,7 +696,7 @@ fn write_rollout(
             "timestamp": "2026-07-25T00:00:00Z",
             "type": "session_meta",
             "payload": {
-                "session_id": id,
+                "session_id": session_id,
                 "id": id,
                 "parent_thread_id": parent,
                 "timestamp": "2026-07-25T00:00:00Z",

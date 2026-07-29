@@ -2,6 +2,7 @@ use serde::Deserialize;
 use serde::Serialize;
 
 use crate::payload::RawPayloadId;
+use crate::raw_event::RawEventSeq;
 
 use super::AgentPath;
 use super::AgentThreadId;
@@ -29,6 +30,8 @@ pub struct ConversationItem {
     /// Runtime activation that first introduced this item locally, when known.
     pub codex_turn_id: Option<CodexTurnId>,
     pub first_seen_at_unix_ms: i64,
+    /// Raw event sequence that first introduced this item to the reduced conversation.
+    pub first_seen_seq: RawEventSeq,
     pub role: ConversationRole,
     /// Codex channel for assistant/tool content, when the item is channel-specific.
     pub channel: Option<ConversationChannel>,

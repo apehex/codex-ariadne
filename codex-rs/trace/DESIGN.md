@@ -24,9 +24,9 @@ Each node also retains a bounded presentation descriptor derived during projecti
 
 `TraceNode::content_document` extracts bounded interpreted Markdown, text, JSON, or code while preserving decoded newlines. It never follows raw payload references; exact artifact access remains an explicit lazy operation through `RawPayloadHandle`.
 
-Containment and causality are distinct. Parent-child edges answer where an item belongs; interaction edges answer how information moved. Broken parent links remain observable, orphans remain reachable, and cycles are cut with a diagnostic.
+Containment, lineage, and causality are distinct. For ordinary rollouts, upstream `SessionMeta.session_id` defines the catalog session, `SessionMeta.id` identifies one thread, and `parent_thread_id` is the only ordinary containment edge. `forked_from_id` and `history_base` remain inspectable lineage metadata and do not merge otherwise independent sessions. Rich containment follows `AgentOrigin`. Interaction edges answer how information moved. Broken or cross-session parents remain observable, affected threads stay reachable from their recorded session, and cycles are cut with a diagnostic.
 
-Children use recorded sequence when available and stable timestamp-and-identity ordering otherwise. Locators survive filtering and sorting within a source version but are not a persisted compatibility promise across upstream schema migrations.
+Siblings use typed source positions: structural thread containers use recorded start time, ordinary records use numeric rollout ordinals, and rich semantic nodes use their first raw event sequence. Timestamped containers precede the causal event stream when both share a parent, rather than comparing incompatible timestamp and sequence units. Unpositioned diagnostics and raw artifacts follow positioned siblings in stable admission order. Display timestamps are never used to reorder records within a thread, so delayed or regressing wall-clock observations remain in causal order. Locators survive filtering and sorting within a source version but are not a persisted compatibility promise across upstream schema migrations.
 
 ## Projection and reconciliation
 

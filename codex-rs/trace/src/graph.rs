@@ -19,15 +19,35 @@ pub(crate) enum Admission {
     MissingParent,
 }
 
+/// Recorded position used to order nodes that share one parent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SiblingOrder {
+    /// Wall-clock position for structural containers that lack a shared event sequence.
+    Timestamp(i64),
+    /// Causal source position, such as an ordinary ordinal or rich event sequence.
+    Sequence(u64),
+    /// No meaningful position is available; retain deterministic admission order.
+    Unspecified,
+}
+
+/// One retained node plus ordering metadata that is not part of the public model.
+#[derive(Debug)]
+struct StoredNode {
+    node: TraceNode,
+    sibling_order: SiblingOrder,
+    admission_index: usize,
+}
+
 /// Owns node limits, duplicate identities, and conflict diagnostics.
 #[derive(Debug)]
 pub(crate) struct TraceGraphBuilder {
     max_nodes: usize,
-    nodes: BTreeMap<TraceNodeLocator, TraceNode>,
+    nodes: BTreeMap<TraceNodeLocator, StoredNode>,
     occurrences: BTreeMap<TraceNodeLocator, usize>,
     latest_observations: BTreeMap<TraceNodeLocator, TraceNodeLocator>,
     diagnostics: Vec<TraceDiagnostic>,
     limit_reported: bool,
+    next_admission_index: usize,
 }
 
 impl TraceGraphBuilder {
@@ -40,19 +60,26 @@ impl TraceGraphBuilder {
             latest_observations: BTreeMap::new(),
             diagnostics,
             limit_reported: false,
+            next_admission_index: 0,
         }
     }
 
     /// Retains one observation, preserving duplicate identities as separate nodes.
-    pub(crate) fn admit(&mut self, mut node: TraceNode, source_path: Option<&Path>) -> Admission {
+    pub(crate) fn admit(
+        &mut self,
+        mut node: TraceNode,
+        sibling_order: SiblingOrder,
+        source_path: Option<&Path>,
+    ) -> Admission {
         self.remap_parent(&mut node);
-        self.retain(node, source_path)
+        self.retain(node, sibling_order, source_path)
     }
 
     /// Retains a child only when its parent is already present.
     pub(crate) fn admit_with_required_parent(
         &mut self,
         mut node: TraceNode,
+        sibling_order: SiblingOrder,
         source_path: Option<&Path>,
     ) -> Admission {
         self.remap_parent(&mut node);
@@ -67,7 +94,7 @@ impl TraceGraphBuilder {
             });
             return Admission::MissingParent;
         }
-        self.retain(node, source_path)
+        self.retain(node, sibling_order, source_path)
     }
 
     /// Applies the most recently retained identity for a repeated parent.
@@ -80,7 +107,12 @@ impl TraceGraphBuilder {
     }
 
     /// Performs bounded duplicate-aware insertion after parent resolution.
-    fn retain(&mut self, mut node: TraceNode, source_path: Option<&Path>) -> Admission {
+    fn retain(
+        &mut self,
+        mut node: TraceNode,
+        sibling_order: SiblingOrder,
+        source_path: Option<&Path>,
+    ) -> Admission {
         if self.nodes.len() >= self.max_nodes {
             self.report_limit(source_path);
             return Admission::LimitReached;
@@ -90,7 +122,7 @@ impl TraceGraphBuilder {
             let occurrence = self.occurrences.entry(base.clone()).or_insert(1);
             *occurrence += 1;
             node.locator.id = format!("{}:observation:{}", base.id, *occurrence);
-            if !same_observation(previous, &node) {
+            if !same_observation(&previous.node, &node) {
                 self.diagnostics.push(TraceDiagnostic {
                     locator: Some(node.locator.clone()),
                     path: source_path.map(Path::to_path_buf),
@@ -106,13 +138,22 @@ impl TraceGraphBuilder {
         }
         let locator = node.locator.clone();
         self.latest_observations.insert(base, locator.clone());
-        self.nodes.insert(locator.clone(), node);
+        let admission_index = self.next_admission_index;
+        self.next_admission_index += 1;
+        self.nodes.insert(
+            locator.clone(),
+            StoredNode {
+                node,
+                sibling_order,
+                admission_index,
+            },
+        );
         Admission::Retained(locator)
     }
 
     /// Returns a retained node for an in-place summary update.
     pub(crate) fn node_mut(&mut self, locator: &TraceNodeLocator) -> Option<&mut TraceNode> {
-        self.nodes.get_mut(locator)
+        self.nodes.get_mut(locator).map(|stored| &mut stored.node)
     }
 
     /// Returns the number of retained nodes.
@@ -142,7 +183,19 @@ impl TraceGraphBuilder {
 
     /// Consumes the builder into deterministically ordered nodes and diagnostics.
     pub(crate) fn finish(self) -> (Vec<TraceNode>, Vec<TraceDiagnostic>) {
-        (self.nodes.into_values().collect(), self.diagnostics)
+        let mut nodes = self.nodes.into_values().collect::<Vec<_>>();
+        nodes.sort_by(|left, right| {
+            left.node
+                .parent
+                .cmp(&right.node.parent)
+                .then_with(|| sibling_order_cmp(left.sibling_order, right.sibling_order))
+                .then(left.admission_index.cmp(&right.admission_index))
+                .then_with(|| left.node.locator.cmp(&right.node.locator))
+        });
+        (
+            nodes.into_iter().map(|stored| stored.node).collect(),
+            self.diagnostics,
+        )
     }
 
     /// Records the hard node limit only once.
@@ -160,6 +213,21 @@ impl TraceGraphBuilder {
                 self.max_nodes
             ),
         });
+    }
+}
+
+/// Orders known source positions before stable unpositioned observations.
+fn sibling_order_cmp(left: SiblingOrder, right: SiblingOrder) -> std::cmp::Ordering {
+    match (left, right) {
+        (SiblingOrder::Timestamp(left), SiblingOrder::Timestamp(right)) => left.cmp(&right),
+        (SiblingOrder::Sequence(left), SiblingOrder::Sequence(right)) => left.cmp(&right),
+        (SiblingOrder::Timestamp(_), SiblingOrder::Sequence(_))
+        | (SiblingOrder::Timestamp(_), SiblingOrder::Unspecified)
+        | (SiblingOrder::Sequence(_), SiblingOrder::Unspecified) => std::cmp::Ordering::Less,
+        (SiblingOrder::Sequence(_), SiblingOrder::Timestamp(_))
+        | (SiblingOrder::Unspecified, SiblingOrder::Timestamp(_))
+        | (SiblingOrder::Unspecified, SiblingOrder::Sequence(_)) => std::cmp::Ordering::Greater,
+        (SiblingOrder::Unspecified, SiblingOrder::Unspecified) => std::cmp::Ordering::Equal,
     }
 }
 
