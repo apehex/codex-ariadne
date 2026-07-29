@@ -5,7 +5,7 @@ use pretty_assertions::assert_eq;
 
 use super::OrdinaryTopology;
 use super::read_bounded_line;
-use crate::model::OrdinaryThread;
+use crate::catalog::OrdinaryThread;
 
 #[test]
 fn bounded_line_retains_exact_limit_and_recovers_after_oversized_line() {

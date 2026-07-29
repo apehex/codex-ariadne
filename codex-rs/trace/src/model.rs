@@ -6,6 +6,9 @@ use serde::Deserialize;
 use serde::Serialize;
 use serde_json::Value;
 
+use crate::catalog::CatalogEntry;
+use crate::payload::BundlePayload;
+
 /// Storage representation contributing evidence to a session projection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -408,6 +411,31 @@ pub struct TraceNode {
     pub detail: Value,
 }
 
+impl TraceNode {
+    /// Creates a projected node whose presentation matches its kind and detail.
+    pub(crate) fn projected(
+        locator: TraceNodeLocator,
+        parent: Option<TraceNodeLocator>,
+        provenance: TraceSourceKind,
+        evidence: EvidenceGrade,
+        timestamp: Option<String>,
+        label: String,
+        detail: Value,
+    ) -> Self {
+        let presentation = TraceRecordPresentation::from_detail(locator.kind, &detail);
+        Self {
+            locator,
+            parent,
+            provenance,
+            evidence,
+            timestamp,
+            label,
+            presentation,
+            detail,
+        }
+    }
+}
+
 /// A loaded root session, ready for tree browsing and local search.
 #[derive(Debug, Clone)]
 pub struct SessionTrace {
@@ -501,40 +529,4 @@ impl RawPayloadHandle {
             .read(&self.reference, limit)
             .await
     }
-}
-
-/// Metadata for one discovered ordinary rollout observation.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct OrdinaryThread {
-    pub path: PathBuf,
-    pub session_id: String,
-    pub thread_id: String,
-    pub parent_thread_id: Option<String>,
-    pub forked_from_thread_id: Option<String>,
-    pub history_base: Option<codex_protocol::protocol::HistoryPosition>,
-    pub timestamp: String,
-    pub cwd: PathBuf,
-    pub model_provider: Option<String>,
-    pub archived: bool,
-}
-
-/// One discovered rich bundle and immutable manifest metadata.
-#[derive(Debug, Clone)]
-pub(crate) struct RichBundle {
-    pub path: PathBuf,
-    pub manifest: codex_rollout_trace::TraceBundleMetadata,
-}
-
-/// Source observations grouped under one root catalog session.
-#[derive(Debug, Clone, Default)]
-pub(crate) struct CatalogEntry {
-    pub ordinary: Vec<OrdinaryThread>,
-    pub rich: Vec<RichBundle>,
-}
-
-/// Bundle root and reference needed for an on-demand payload read.
-#[derive(Debug, Clone)]
-pub(crate) struct BundlePayload {
-    pub bundle_root: PathBuf,
-    pub reference: RawPayloadRef,
 }

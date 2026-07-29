@@ -22,7 +22,7 @@ use crate::TraceNode;
 use crate::TraceNodeKind;
 use crate::TraceNodeLocator;
 use crate::TraceSourceKind;
-use crate::model::OrdinaryThread;
+use crate::catalog::OrdinaryThread;
 
 /// Precomputed ordinary-thread identity and containment relationships.
 pub(crate) struct OrdinaryTopology<'a> {
@@ -120,19 +120,15 @@ pub(crate) async fn load_thread(
         "history_base": thread.history_base,
     });
     let admission = graph.admit(
-        TraceNode {
-            locator: base_thread_locator,
-            parent: Some(parent),
-            provenance: TraceSourceKind::Ordinary,
-            evidence: EvidenceGrade::Semantic,
-            timestamp: Some(thread.timestamp.clone()),
-            label: format!("thread {}", thread.thread_id),
-            presentation: crate::TraceRecordPresentation::from_detail(
-                TraceNodeKind::Thread,
-                &thread_detail,
-            ),
-            detail: thread_detail,
-        },
+        TraceNode::projected(
+            base_thread_locator,
+            Some(parent),
+            TraceSourceKind::Ordinary,
+            EvidenceGrade::Semantic,
+            Some(thread.timestamp.clone()),
+            format!("thread {}", thread.thread_id),
+            thread_detail,
+        ),
         thread_start_order(&thread.timestamp),
         Some(&thread.path),
     );
@@ -217,23 +213,22 @@ pub(crate) async fn load_thread(
             .and_then(serde_json::Value::as_u64)
             .unwrap_or(line_index);
         graph.admit(
-            TraceNode {
-                locator: TraceNodeLocator::new(
+            TraceNode::projected(
+                TraceNodeLocator::new(
                     session_id,
                     kind,
                     format!("ordinary:{}:{ordinal}", thread.thread_id),
                 ),
-                parent: Some(thread_locator.clone()),
-                provenance: TraceSourceKind::Ordinary,
-                evidence: EvidenceGrade::Semantic,
-                timestamp: value
+                Some(thread_locator.clone()),
+                TraceSourceKind::Ordinary,
+                EvidenceGrade::Semantic,
+                value
                     .get("timestamp")
                     .and_then(serde_json::Value::as_str)
                     .map(str::to_owned),
-                label: label.to_string(),
-                presentation: crate::TraceRecordPresentation::from_detail(kind, &value),
-                detail: value,
-            },
+                label.to_string(),
+                value,
+            ),
             SiblingOrder::Sequence(ordinal),
             Some(&thread.path),
         );

@@ -7,6 +7,13 @@ use anyhow::bail;
 use codex_rollout_trace::RawPayloadRef;
 use tokio::io::AsyncReadExt;
 
+/// Bundle root and reference needed for an on-demand payload read.
+#[derive(Debug, Clone)]
+pub(crate) struct BundlePayload {
+    pub(crate) bundle_root: PathBuf,
+    pub(crate) reference: RawPayloadRef,
+}
+
 /// Maximum raw bytes to read before returning a truncated display payload.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PayloadReadLimit(usize);

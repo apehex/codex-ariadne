@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use anyhow::Context;
 use anyhow::Result;
 use chrono::DateTime;
+use codex_protocol::protocol::HistoryPosition;
 use codex_rollout::ARCHIVED_SESSIONS_SUBDIR;
 use codex_rollout::SESSIONS_SUBDIR;
 
@@ -22,9 +23,35 @@ use crate::TraceNodeKind;
 use crate::TraceNodeLocator;
 use crate::TraceSourceKind;
 use crate::TraceStatus;
-use crate::model::CatalogEntry;
-use crate::model::OrdinaryThread;
-use crate::model::RichBundle;
+
+/// Metadata for one discovered ordinary rollout observation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct OrdinaryThread {
+    pub(crate) path: PathBuf,
+    pub(crate) session_id: String,
+    pub(crate) thread_id: String,
+    pub(crate) parent_thread_id: Option<String>,
+    pub(crate) forked_from_thread_id: Option<String>,
+    pub(crate) history_base: Option<HistoryPosition>,
+    pub(crate) timestamp: String,
+    pub(crate) cwd: PathBuf,
+    pub(crate) model_provider: Option<String>,
+    pub(crate) archived: bool,
+}
+
+/// One discovered rich bundle and immutable manifest metadata.
+#[derive(Debug, Clone)]
+struct RichBundle {
+    path: PathBuf,
+    manifest: codex_rollout_trace::TraceBundleMetadata,
+}
+
+/// Source observations grouped under one root catalog session.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct CatalogEntry {
+    pub(crate) ordinary: Vec<OrdinaryThread>,
+    rich: Vec<RichBundle>,
+}
 
 /// Read-only entry point for discovering ordinary and rich local traces.
 #[derive(Debug, Clone)]
@@ -279,19 +306,15 @@ impl TraceCatalog {
         let session_locator = TraceNodeLocator::new(session_id, TraceNodeKind::Session, session_id);
         let session_detail = serde_json::to_value(&summary)?;
         graph.admit(
-            TraceNode {
-                locator: session_locator.clone(),
-                parent: None,
-                provenance: summary.source,
-                evidence: EvidenceGrade::Reconstructed,
-                timestamp: summary.created_at.clone(),
-                label: format!("session {session_id}"),
-                presentation: crate::TraceRecordPresentation::from_detail(
-                    TraceNodeKind::Session,
-                    &session_detail,
-                ),
-                detail: session_detail,
-            },
+            TraceNode::projected(
+                session_locator.clone(),
+                None,
+                summary.source,
+                EvidenceGrade::Reconstructed,
+                summary.created_at.clone(),
+                format!("session {session_id}"),
+                session_detail,
+            ),
             SiblingOrder::Unspecified,
             /*source_path*/ None,
         );
@@ -375,19 +398,15 @@ impl TraceCatalog {
             );
             let detail = serde_json::to_value(diagnostic)?;
             graph.admit(
-                TraceNode {
+                TraceNode::projected(
                     locator,
-                    parent: Some(session_locator.clone()),
-                    provenance: diagnostic_provenance(diagnostic, entry),
-                    evidence: diagnostic.evidence,
-                    timestamp: None,
-                    label: diagnostic.message.clone(),
-                    presentation: crate::TraceRecordPresentation::from_detail(
-                        TraceNodeKind::Diagnostic,
-                        &detail,
-                    ),
+                    Some(session_locator.clone()),
+                    diagnostic_provenance(diagnostic, entry),
+                    diagnostic.evidence,
+                    None,
+                    diagnostic.message.clone(),
                     detail,
-                },
+                ),
                 SiblingOrder::Unspecified,
                 diagnostic.path.as_deref(),
             );
