@@ -4,12 +4,13 @@ use anyhow::Result;
 use codex_rollout_trace::AgentOrigin;
 use serde::Serialize;
 
-use crate::BundlePayload;
+use crate::Admission;
 use crate::EvidenceGrade;
-use crate::TraceDiagnostic;
+use crate::TraceGraphBuilder;
 use crate::TraceNode;
 use crate::TraceNodeKind;
 use crate::TraceNodeLocator;
+use crate::model::BundlePayload;
 
 // Projection keeps source identity, evidence policy, and bounded output stores
 // explicit at this one source-boundary call.
@@ -19,11 +20,9 @@ pub(crate) fn project_rich(
     bundle_path: &std::path::Path,
     trace: &codex_rollout_trace::RolloutTrace,
     semantically_complete: bool,
-    max_nodes: usize,
     session_locator: &TraceNodeLocator,
-    nodes: &mut BTreeMap<TraceNodeLocator, TraceNode>,
+    graph: &mut TraceGraphBuilder,
     payloads: &mut BTreeMap<String, BundlePayload>,
-    diagnostics: &mut Vec<TraceDiagnostic>,
 ) -> Result<()> {
     let semantic_evidence = if semantically_complete {
         EvidenceGrade::Semantic
@@ -41,7 +40,7 @@ pub(crate) fn project_rich(
             AgentOrigin::Spawned {
                 parent_thread_id, ..
             } => {
-                diagnostics.push(TraceDiagnostic {
+                graph.record_diagnostic(crate::TraceDiagnostic {
                     locator: Some(locator(session_id, TraceNodeKind::Thread, id)),
                     path: Some(bundle_path.to_path_buf()),
                     evidence: EvidenceGrade::Unavailable,
@@ -53,26 +52,26 @@ pub(crate) fn project_rich(
             }
         };
         insert(
-            nodes,
+            graph,
             locator(session_id, TraceNodeKind::Thread, id),
             Some(parent),
             Some(thread.execution.started_at_unix_ms.to_string()),
             format!("thread {}", thread.agent_path),
             thread,
             semantic_evidence,
-            max_nodes,
+            ParentAdmission::Deferred,
         )?;
     }
     for (id, turn) in &trace.codex_turns {
         insert(
-            nodes,
+            graph,
             locator(session_id, TraceNodeKind::Turn, id),
             Some(locator(session_id, TraceNodeKind::Thread, &turn.thread_id)),
             Some(turn.execution.started_at_unix_ms.to_string()),
             format!("turn {id}"),
             turn,
             semantic_evidence,
-            max_nodes,
+            ParentAdmission::Required,
         )?;
     }
     for (id, item) in &trace.conversation_items {
@@ -81,19 +80,19 @@ pub(crate) fn project_rich(
             |turn| locator(session_id, TraceNodeKind::Turn, turn),
         );
         insert(
-            nodes,
+            graph,
             locator(session_id, TraceNodeKind::ConversationItem, id),
             Some(parent),
             Some(item.first_seen_at_unix_ms.to_string()),
             format!("conversation {:?}", item.kind),
             item,
             semantic_evidence,
-            max_nodes,
+            ParentAdmission::Required,
         )?;
     }
     for (id, inference) in &trace.inference_calls {
         insert(
-            nodes,
+            graph,
             locator(session_id, TraceNodeKind::Inference, id),
             Some(locator(
                 session_id,
@@ -104,7 +103,7 @@ pub(crate) fn project_rich(
             format!("inference {}", inference.model),
             inference,
             semantic_evidence,
-            max_nodes,
+            ParentAdmission::Required,
         )?;
     }
     for (id, tool) in &trace.tool_calls {
@@ -113,19 +112,19 @@ pub(crate) fn project_rich(
             |turn| locator(session_id, TraceNodeKind::Turn, turn),
         );
         insert(
-            nodes,
+            graph,
             locator(session_id, TraceNodeKind::ToolCall, id),
             Some(parent),
             Some(tool.execution.started_at_unix_ms.to_string()),
             format!("tool {:?}", tool.kind),
             tool,
             semantic_evidence,
-            max_nodes,
+            ParentAdmission::Required,
         )?;
     }
     for (id, cell) in &trace.code_cells {
         insert(
-            nodes,
+            graph,
             locator(session_id, TraceNodeKind::CodeCell, id),
             Some(locator(
                 session_id,
@@ -136,45 +135,30 @@ pub(crate) fn project_rich(
             format!("code cell {id}"),
             cell,
             semantic_evidence,
-            max_nodes,
+            ParentAdmission::Required,
         )?;
     }
-    project_runtime_maps(
-        session_id,
-        trace,
-        session_locator,
-        nodes,
-        semantic_evidence,
-        max_nodes,
-    )?;
+    project_runtime_maps(session_id, trace, session_locator, graph, semantic_evidence)?;
     for (id, reference) in &trace.raw_payloads {
         let inserted = insert(
-            nodes,
+            graph,
             locator(session_id, TraceNodeKind::RawPayload, id),
             Some(session_locator.clone()),
             None,
             format!("payload {:?}", reference.kind),
             reference,
             EvidenceGrade::Exact,
-            max_nodes,
+            ParentAdmission::Required,
         )?;
-        if inserted {
+        if let Admission::Retained(locator) = inserted {
             payloads.insert(
-                id.clone(),
+                locator.id,
                 BundlePayload {
                     bundle_root: bundle_path.to_path_buf(),
                     reference: reference.clone(),
                 },
             );
         }
-    }
-    if nodes.len() >= max_nodes {
-        diagnostics.push(TraceDiagnostic {
-            locator: None,
-            path: Some(bundle_path.to_path_buf()),
-            evidence: EvidenceGrade::Unavailable,
-            message: format!("session node materialization stopped at {max_nodes} nodes"),
-        });
     }
     Ok(())
 }
@@ -183,13 +167,12 @@ fn project_runtime_maps(
     session_id: &str,
     trace: &codex_rollout_trace::RolloutTrace,
     session_locator: &TraceNodeLocator,
-    nodes: &mut BTreeMap<TraceNodeLocator, TraceNode>,
+    graph: &mut TraceGraphBuilder,
     semantic_evidence: EvidenceGrade,
-    max_nodes: usize,
 ) -> Result<()> {
     for (id, compaction) in &trace.compactions {
         insert(
-            nodes,
+            graph,
             locator(session_id, TraceNodeKind::Compaction, id),
             Some(locator(
                 session_id,
@@ -200,12 +183,12 @@ fn project_runtime_maps(
             format!("compaction {id}"),
             compaction,
             semantic_evidence,
-            max_nodes,
+            ParentAdmission::Required,
         )?;
     }
     for (id, request) in &trace.compaction_requests {
         insert(
-            nodes,
+            graph,
             locator(session_id, TraceNodeKind::CompactionRequest, id),
             Some(locator(
                 session_id,
@@ -216,28 +199,12 @@ fn project_runtime_maps(
             format!("compaction request {}", request.model),
             request,
             semantic_evidence,
-            max_nodes,
-        )?;
-    }
-    for (id, terminal) in &trace.terminal_sessions {
-        insert(
-            nodes,
-            locator(session_id, TraceNodeKind::TerminalSession, id),
-            Some(locator(
-                session_id,
-                TraceNodeKind::TerminalOperation,
-                &terminal.created_by_operation_id,
-            )),
-            Some(terminal.execution.started_at_unix_ms.to_string()),
-            format!("terminal {id}"),
-            terminal,
-            semantic_evidence,
-            max_nodes,
+            ParentAdmission::Required,
         )?;
     }
     for (id, operation) in &trace.terminal_operations {
         insert(
-            nodes,
+            graph,
             locator(session_id, TraceNodeKind::TerminalOperation, id),
             Some(locator(
                 session_id,
@@ -248,19 +215,35 @@ fn project_runtime_maps(
             format!("terminal operation {:?}", operation.kind),
             operation,
             semantic_evidence,
-            max_nodes,
+            ParentAdmission::Required,
+        )?;
+    }
+    for (id, terminal) in &trace.terminal_sessions {
+        insert(
+            graph,
+            locator(session_id, TraceNodeKind::TerminalSession, id),
+            Some(locator(
+                session_id,
+                TraceNodeKind::TerminalOperation,
+                &terminal.created_by_operation_id,
+            )),
+            Some(terminal.execution.started_at_unix_ms.to_string()),
+            format!("terminal {id}"),
+            terminal,
+            semantic_evidence,
+            ParentAdmission::Required,
         )?;
     }
     for (id, edge) in &trace.interaction_edges {
         insert(
-            nodes,
+            graph,
             locator(session_id, TraceNodeKind::InteractionEdge, id),
             Some(session_locator.clone()),
             Some(edge.started_at_unix_ms.to_string()),
             format!("interaction {:?}", edge.kind),
             edge,
             semantic_evidence,
-            max_nodes,
+            ParentAdmission::Required,
         )?;
     }
     Ok(())
@@ -270,34 +253,40 @@ fn project_runtime_maps(
 // node representation at the projection boundary.
 #[allow(clippy::too_many_arguments)]
 fn insert<T: Serialize>(
-    nodes: &mut BTreeMap<TraceNodeLocator, TraceNode>,
+    graph: &mut TraceGraphBuilder,
     locator: TraceNodeLocator,
     parent: Option<TraceNodeLocator>,
     timestamp: Option<String>,
     label: String,
     value: &T,
     evidence: EvidenceGrade,
-    max_nodes: usize,
-) -> Result<bool> {
-    if nodes.len() >= max_nodes && !nodes.contains_key(&locator) {
-        return Ok(false);
-    }
+    parent_admission: ParentAdmission,
+) -> Result<Admission> {
     let detail = serde_json::to_value(value)?;
     let presentation = crate::TraceRecordPresentation::from_detail(locator.kind, &detail);
-    nodes.insert(
-        locator.clone(),
-        TraceNode {
-            locator,
-            parent,
-            provenance: crate::TraceSourceKind::Rich,
-            evidence,
-            timestamp,
-            label,
-            presentation,
-            detail,
-        },
-    );
-    Ok(true)
+    let node = TraceNode {
+        locator,
+        parent,
+        provenance: crate::TraceSourceKind::Rich,
+        evidence,
+        timestamp,
+        label,
+        presentation,
+        detail,
+    };
+    Ok(match parent_admission {
+        ParentAdmission::Deferred => graph.admit(node, /*source_path*/ None),
+        ParentAdmission::Required => {
+            graph.admit_with_required_parent(node, /*source_path*/ None)
+        }
+    })
+}
+
+/// Whether the source guarantees that a parent was projected earlier.
+#[derive(Debug, Clone, Copy)]
+enum ParentAdmission {
+    Deferred,
+    Required,
 }
 
 fn locator(session_id: &str, kind: TraceNodeKind, id: &str) -> TraceNodeLocator {

@@ -2,8 +2,6 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
-use anyhow::Result;
-use codex_trace::RawPayloadHandle;
 use codex_trace::SanitizedPayload;
 use codex_trace::SearchHit;
 use codex_trace::SessionTrace;
@@ -21,9 +19,10 @@ use crate::TraceViewOptions;
 use crate::TraceVisualRenderer;
 use crate::jobs::DetailRenderJob;
 use crate::jobs::DetailRenderKey;
-use crate::jobs::DetailRenderResult;
 use crate::jobs::SearchJob;
-use crate::jobs::SearchResult;
+
+mod detail;
+mod search;
 
 #[derive(Debug, Clone)]
 struct NavigationFrame {
@@ -183,6 +182,11 @@ impl BrowserState {
         &self.options
     }
 
+    /// Returns the stable root-session identity owned by this browser.
+    pub(crate) fn session_id(&self) -> &str {
+        &self.trace.summary.session_id
+    }
+
     pub(crate) fn renderer(&self) -> &dyn TraceVisualRenderer {
         self.renderer.as_ref()
     }
@@ -271,15 +275,6 @@ impl BrowserState {
         }
     }
 
-    pub(crate) fn open_detail(&mut self) {
-        if self.selected_node().is_some() {
-            self.detail_open = true;
-            self.detail_scroll = 0;
-            self.content_mode = ContentMode::Rendered;
-            self.invalidate_detail();
-        }
-    }
-
     pub(crate) fn back(&mut self) -> bool {
         if self.detail_open {
             self.detail_open = false;
@@ -293,305 +288,6 @@ impl BrowserState {
         self.viewport = frame.viewport;
         self.rebuild_rows(frame.selected.as_ref());
         true
-    }
-
-    pub(crate) fn cycle_content_mode(&mut self) {
-        self.content_mode = self.content_mode.next();
-        self.detail_scroll = 0;
-        self.invalidate_detail();
-    }
-
-    pub(crate) fn scroll_detail(&mut self, delta: isize) {
-        self.detail_scroll = self.detail_scroll.saturating_add_signed(delta);
-    }
-
-    pub(crate) fn detail_lines(&mut self, width: usize) -> &[Line<'static>] {
-        let Some(node) = self.selected_node().cloned() else {
-            return &[];
-        };
-        let key = DetailRenderKey {
-            locator: node.locator.clone(),
-            width,
-            mode: self.content_mode,
-            payload_generation: self.payload_generation,
-        };
-        if self
-            .detail_cache
-            .as_ref()
-            .is_some_and(|cache| cache.key == key)
-        {
-            return self
-                .detail_cache
-                .as_ref()
-                .map(|cache| cache.lines.as_slice())
-                .unwrap_or_default();
-        }
-        if self
-            .pending_detail
-            .as_ref()
-            .is_none_or(|pending| pending.key != key)
-        {
-            self.detail_cache = None;
-            self.detail_generation = self.detail_generation.wrapping_add(1);
-            self.pending_detail = Some(PendingDetail {
-                key: key.clone(),
-                generation: self.detail_generation,
-            });
-            self.queued_detail_job = Some(DetailRenderJob {
-                key,
-                generation: self.detail_generation,
-                trace: Arc::clone(&self.trace),
-                index: Arc::clone(&self.index),
-                payload: self.payloads.get(&node.locator.id).and_then(|state| {
-                    if let PayloadState::Loaded(payload) = state {
-                        Some(Arc::clone(payload))
-                    } else {
-                        None
-                    }
-                }),
-                cwd: self.trace.summary.cwd.clone(),
-                renderer: Arc::clone(&self.renderer),
-            });
-        }
-        &[]
-    }
-
-    pub(crate) fn selected_is_raw_payload(&self) -> bool {
-        self.selected_node()
-            .is_some_and(|node| node.locator.kind == TraceNodeKind::RawPayload)
-    }
-
-    pub(crate) fn detail_truncated(&self) -> bool {
-        self.detail_cache
-            .as_ref()
-            .is_some_and(|cache| cache.truncated)
-    }
-
-    pub(crate) fn take_detail_render_job(&mut self) -> Option<DetailRenderJob> {
-        self.queued_detail_job.take()
-    }
-
-    pub(crate) fn install_detail_render(&mut self, result: DetailRenderResult) {
-        let matches_pending = self.pending_detail.as_ref().is_some_and(|pending| {
-            pending.generation == result.generation && pending.key == result.key
-        });
-        if !matches_pending {
-            return;
-        }
-        self.pending_detail = None;
-        let is_current = self
-            .selected_node()
-            .is_some_and(|node| node.locator == result.key.locator)
-            && self.content_mode == result.key.mode
-            && self.payload_generation == result.key.payload_generation;
-        if !is_current {
-            return;
-        }
-        self.detail_cache = Some(DetailCache {
-            key: result.key,
-            truncated: result.truncated,
-            lines: result.lines,
-        });
-    }
-
-    pub(crate) fn selected_payload_request(&mut self) -> Option<(String, RawPayloadHandle)> {
-        let node = self.selected_node()?;
-        if node.locator.kind != TraceNodeKind::RawPayload {
-            return None;
-        }
-        let id = node.locator.id.clone();
-        if self.payloads.contains_key(&id) {
-            return None;
-        }
-        let handle = self.trace.raw_payload(&id)?;
-        self.payloads.insert(id.clone(), PayloadState::Loading);
-        self.payload_generation = self.payload_generation.wrapping_add(1);
-        self.invalidate_detail();
-        Some((id, handle))
-    }
-
-    pub(crate) fn install_payload(&mut self, id: String, result: Result<SanitizedPayload>) {
-        let state = match result {
-            Ok(payload) => PayloadState::Loaded(Arc::new(payload)),
-            Err(error) => PayloadState::Failed(format!("{error:#}")),
-        };
-        self.payloads.insert(id, state);
-        self.payload_generation = self.payload_generation.wrapping_add(1);
-        self.invalidate_detail();
-    }
-
-    pub(crate) fn payload_notice(&self) -> Option<&str> {
-        let node = self.selected_node()?;
-        match self.payloads.get(&node.locator.id) {
-            Some(PayloadState::Loading) => Some("loading exact raw artifact…"),
-            Some(PayloadState::Failed(message)) => Some(message),
-            Some(PayloadState::Loaded(_)) | None => None,
-        }
-    }
-
-    pub(crate) fn begin_search(&mut self, scope: SearchScope) {
-        self.invalidate_search_job();
-        self.search = Some(SearchState {
-            query: String::new(),
-            hits: Vec::new(),
-            selected: 0,
-            scope,
-            loading: false,
-            completed_query: None,
-        });
-    }
-
-    pub(crate) fn cancel_search(&mut self) {
-        self.search = None;
-        self.invalidate_search_job();
-    }
-
-    pub(crate) fn search_push(&mut self, ch: char) {
-        if let Some(search) = &mut self.search {
-            search.query.push(ch);
-            search.hits.clear();
-            search.selected = 0;
-            search.loading = false;
-            search.completed_query = None;
-        }
-        self.invalidate_search_job();
-    }
-
-    pub(crate) fn search_pop(&mut self) {
-        if let Some(search) = &mut self.search {
-            search.query.pop();
-            search.hits.clear();
-            search.selected = 0;
-            search.loading = false;
-            search.completed_query = None;
-        }
-        self.invalidate_search_job();
-    }
-
-    pub(crate) fn move_search(&mut self, delta: isize) {
-        if let Some(search) = &mut self.search {
-            search.selected = move_index(search.selected, delta, search.hits.len());
-        }
-    }
-
-    pub(crate) fn accept_search(&mut self) {
-        let Some(search) = &self.search else {
-            return;
-        };
-        if search.loading {
-            return;
-        }
-        let query = search.query.clone();
-        let scope = search.scope;
-        let needs_search = search.completed_query.as_deref() != Some(query.as_str());
-        if needs_search {
-            if query.trim().is_empty() {
-                return;
-            }
-            self.search_generation = self.search_generation.wrapping_add(1);
-            let generation = self.search_generation;
-            if let Some(search) = &mut self.search {
-                search.loading = true;
-                search.hits.clear();
-            }
-            self.pending_search_generation = Some(generation);
-            self.queued_search_job = Some(SearchJob {
-                generation,
-                query,
-                scope,
-                trace: Arc::clone(&self.trace),
-                index: Arc::clone(&self.index),
-                visible_classes: self.visible_classes.clone(),
-            });
-            return;
-        }
-        let Some(search) = self.search.take() else {
-            return;
-        };
-        let locator = search
-            .hits
-            .get(search.selected)
-            .map(|hit| hit.locator.clone());
-        self.last_search = Some(search);
-        if let Some(locator) = locator {
-            self.reveal(locator);
-        }
-    }
-
-    pub(crate) fn take_search_job(&mut self) -> Option<SearchJob> {
-        self.queued_search_job.take()
-    }
-
-    pub(crate) fn install_search(&mut self, result: SearchResult) {
-        if self.pending_search_generation != Some(result.generation) {
-            return;
-        }
-        self.pending_search_generation = None;
-        let Some(search) = &mut self.search else {
-            return;
-        };
-        if search.query != result.query || search.scope != result.scope {
-            return;
-        }
-        search.hits = result.hits;
-        search.selected = 0;
-        search.loading = false;
-        search.completed_query = Some(result.query);
-    }
-
-    pub(crate) fn jump_search(&mut self, delta: isize) {
-        let locator = self.last_search.as_mut().and_then(|search| {
-            search.selected = move_wrapped(search.selected, delta, search.hits.len());
-            search
-                .hits
-                .get(search.selected)
-                .map(|hit| hit.locator.clone())
-        });
-        if let Some(locator) = locator {
-            self.reveal(locator);
-        }
-    }
-
-    pub(crate) fn filter_classes() -> &'static [TraceRecordClass] {
-        &TraceRecordClass::ALL
-    }
-
-    pub(crate) fn class_visible(&self, class: TraceRecordClass) -> bool {
-        self.visible_classes.contains(&class)
-    }
-
-    pub(crate) fn toggle_filter_class(&mut self) {
-        let Some(class) = Self::filter_classes().get(self.filter_index).copied() else {
-            return;
-        };
-        let preferred = self.selected_node().map(|node| node.locator.clone());
-        if !self.visible_classes.remove(&class) {
-            self.visible_classes.insert(class);
-        }
-        self.temporary_reveal = None;
-        self.invalidate_visible_search();
-        self.rebuild_rows(preferred.as_ref());
-    }
-
-    pub(crate) fn move_filter(&mut self, delta: isize) {
-        self.filter_index = move_index(self.filter_index, delta, Self::filter_classes().len());
-    }
-
-    pub(crate) fn apply_filter(&mut self) {
-        let preferred = self.selected_node().map(|node| node.locator.clone());
-        self.rebuild_rows(preferred.as_ref());
-        self.filter_open = false;
-    }
-
-    pub(crate) fn reset_filter(&mut self) {
-        self.visible_classes = TraceRecordClass::ALL.into_iter().collect();
-        self.temporary_reveal = None;
-        self.invalidate_visible_search();
-        self.apply_filter();
-    }
-
-    pub(crate) fn hidden_count(&self) -> usize {
-        self.hidden_rows
     }
 
     fn reveal(&mut self, locator: TraceNodeLocator) {
@@ -623,14 +319,18 @@ impl BrowserState {
             None => self.index.root_positions(&self.trace).collect(),
         };
         let mut hidden_rows = 0;
-        self.rows.retain(|position| {
-            let visible = self.trace.nodes.get(*position).is_some_and(|node| {
-                self.visible_classes.contains(&node.presentation.class)
-                    || self.temporary_reveal.as_ref() == Some(&node.locator)
+        if self.visible_classes.len() != TraceRecordClass::ALL.len()
+            || self.temporary_reveal.is_some()
+        {
+            self.rows.retain(|position| {
+                let visible = self.trace.nodes.get(*position).is_some_and(|node| {
+                    self.visible_classes.contains(&node.presentation.class)
+                        || self.temporary_reveal.as_ref() == Some(&node.locator)
+                });
+                hidden_rows += usize::from(!visible);
+                visible
             });
-            hidden_rows += usize::from(!visible);
-            visible
-        });
+        }
         self.hidden_rows = hidden_rows;
         self.selected = preferred
             .and_then(|locator| {
@@ -678,40 +378,6 @@ impl BrowserState {
             self.rebuild_rows(preferred.as_ref());
         }
         self.detail_scroll = 0;
-    }
-
-    fn invalidate_detail(&mut self) {
-        self.detail_cache = None;
-        self.pending_detail = None;
-        self.queued_detail_job = None;
-    }
-
-    fn invalidate_search_job(&mut self) {
-        self.search_generation = self.search_generation.wrapping_add(1);
-        self.pending_search_generation = None;
-        self.queued_search_job = None;
-    }
-
-    fn invalidate_visible_search(&mut self) {
-        if self
-            .last_search
-            .as_ref()
-            .is_some_and(|search| search.scope == SearchScope::Visible)
-        {
-            self.last_search = None;
-        }
-        let invalidate_active = self
-            .search
-            .as_ref()
-            .is_some_and(|search| search.scope == SearchScope::Visible);
-        if invalidate_active && let Some(search) = &mut self.search {
-            search.hits.clear();
-            search.loading = false;
-            search.completed_query = None;
-        }
-        if invalidate_active {
-            self.invalidate_search_job();
-        }
     }
 }
 

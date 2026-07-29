@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 """Generate and launch Ariadne's deterministic synthetic trace bundle."""
 
-from __future__ import annotations
-
 import argparse
 import hashlib
 import json
@@ -29,6 +27,7 @@ RESULT_NOTIFICATION = (
 
 
 def encoded_json(value: Any, *, pretty: bool = False) -> bytes:
+    """Encode deterministic UTF-8 JSON."""
     options = {
         "ensure_ascii": False,
         "sort_keys": True,
@@ -41,6 +40,7 @@ def encoded_json(value: Any, *, pretty: bool = False) -> bytes:
 
 
 def message(role: str, text: str, text_type: str) -> dict[str, Any]:
+    """Build one model-visible message payload."""
     return {
         "content": [{"text": text, "type": text_type}],
         "role": role,
@@ -55,6 +55,7 @@ def inter_agent_message(
     *,
     trigger_turn: bool,
 ) -> str:
+    """Encode one deterministic inter-agent mailbox message."""
     return json.dumps(
         {
             "author": author,
@@ -69,11 +70,15 @@ def inter_agent_message(
 
 
 class BundleBuilder:
+    """Accumulate deterministic payload files and ordered trace events."""
+
     def __init__(self) -> None:
+        """Create an empty synthetic bundle."""
         self._files: dict[str, bytes] = {}
         self._events: list[dict[str, Any]] = []
 
     def payload(self, kind: str, value: Any) -> dict[str, Any]:
+        """Add a JSON payload and return its manifest reference."""
         ordinal = 1 + sum(path.startswith("payloads/") for path in self._files)
         path = f"payloads/{ordinal}.json"
         self._files[path] = encoded_json(value, pretty=True)
@@ -91,6 +96,7 @@ class BundleBuilder:
         context_turn_id: str | None = None,
         **fields: Any,
     ) -> None:
+        """Append one ordered raw trace event."""
         seq = len(self._events) + 1
         self._events.append(
             {
@@ -105,6 +111,7 @@ class BundleBuilder:
         )
 
     def files(self) -> dict[str, bytes]:
+        """Materialize the complete deterministic bundle file map."""
         manifest = {
             "payloads_dir": "payloads",
             "raw_event_log": "trace.jsonl",
@@ -124,6 +131,7 @@ class BundleBuilder:
 
 
 def bundle_files() -> dict[str, bytes]:
+    """Build the synthetic parent/child-agent demonstration bundle."""
     bundle = BundleBuilder()
     root_turn = "turn-synthetic-root"
     child_turn = "turn-synthetic-child"
@@ -464,6 +472,7 @@ def bundle_files() -> dict[str, bytes]:
 
 
 def tree_fingerprint(files: dict[str, bytes]) -> str:
+    """Hash a deterministic path-and-content file map."""
     digest = hashlib.sha256()
     for relative_path, contents in sorted(files.items()):
         digest.update(relative_path.encode("utf-8"))
@@ -474,6 +483,7 @@ def tree_fingerprint(files: dict[str, bytes]) -> str:
 
 
 def generate_bundle(output: Path) -> None:
+    """Write the expected synthetic bundle into an empty output directory."""
     if output.exists() and any(output.iterdir()):
         raise SystemExit(f"refusing to overwrite non-empty directory: {output}")
     output.mkdir(parents=True, exist_ok=True)
@@ -487,6 +497,7 @@ def generate_bundle(output: Path) -> None:
 
 
 def verify_bundle(bundle: Path) -> None:
+    """Verify that a bundle exactly matches generated deterministic bytes."""
     if not bundle.is_dir():
         raise SystemExit(f"bundle directory does not exist: {bundle}")
     expected = bundle_files()
@@ -513,6 +524,7 @@ def verify_bundle(bundle: Path) -> None:
 
 
 def launch_demo(binary: str) -> None:
+    """Generate, verify, and open a temporary bundle with the normal CLI."""
     with tempfile.TemporaryDirectory(prefix="ariadne-trace-demo-") as temp:
         bundle = Path(temp) / "synthetic-bundle"
         generate_bundle(bundle)
@@ -520,6 +532,7 @@ def launch_demo(binary: str) -> None:
 
 
 def parse_args() -> argparse.Namespace:
+    """Parse demo generation, verification, and launch arguments."""
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
     generate = commands.add_parser("generate", help="write a deterministic bundle")
@@ -532,6 +545,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    """Run the selected demo operation."""
     args = parse_args()
     if args.command == "generate":
         generate_bundle(args.output)

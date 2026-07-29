@@ -118,4 +118,4 @@ The local engineering acceptance criteria are satisfied. The plan remains open b
 
 ## Successor UI plan
 
-The accepted `.ariadne/plans/open/2026-07-28-single-panel-trace-browser.md` supersedes this plan's three-pane, flattened-tree, fold/expand, and expansion/collapse performance requirements. The implementation receipt above remains historical evidence; correctness, privacy, offline/read-only, compatibility, CI, and public-prototype gates remain active.
+The [closed single-panel plan](../closed/2026-07-28-single-panel-trace-browser.md) supersedes this plan's three-pane, flattened-tree, fold/expand, and expansion/collapse performance requirements. The implementation receipt above remains historical evidence; correctness, privacy, offline/read-only, compatibility, CI, and public-prototype gates remain active.

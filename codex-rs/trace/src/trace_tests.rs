@@ -179,6 +179,65 @@ async fn matching_ordinary_and_rich_sources_merge_without_node_loss() {
 }
 
 #[tokio::test]
+async fn duplicate_ordinary_observations_are_retained_with_stable_parentage() {
+    let temp = TempDir::new().unwrap();
+    write_rollout(temp.path(), ROOT_ID, None, "first observation", None);
+    let source = temp.path().join(format!(
+        "sessions/2026/07/25/rollout-2026-07-25T00-00-00-{ROOT_ID}.jsonl"
+    ));
+    let archived_directory = temp.path().join("archived_sessions/2026/07/25");
+    fs::create_dir_all(&archived_directory).unwrap();
+    let archived = archived_directory.join(format!("rollout-2026-07-25T00-00-00-{ROOT_ID}.jsonl"));
+    fs::write(
+        &archived,
+        fs::read_to_string(&source)
+            .unwrap()
+            .replace("first observation", "conflicting observation"),
+    )
+    .unwrap();
+
+    let catalog = TraceRepository::new(temp.path().to_path_buf())
+        .discover()
+        .await;
+    let trace = catalog.load_session(ROOT_ID).await.unwrap();
+    let repeated_thread = TraceNodeLocator::new(
+        ROOT_ID,
+        TraceNodeKind::Thread,
+        format!("ordinary:{ROOT_ID}:observation:2"),
+    );
+    let repeated_record = trace
+        .nodes
+        .iter()
+        .find(|node| node.locator.id == format!("ordinary:{ROOT_ID}:2:observation:2"))
+        .expect("repeated ordinary record");
+
+    assert!(trace.node(&repeated_thread).is_some());
+    assert_eq!(repeated_record.parent.as_ref(), Some(&repeated_thread));
+    assert!(
+        trace
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.evidence == EvidenceGrade::Conflicting)
+    );
+    assert_eq!(
+        trace
+            .search("first observation")
+            .into_iter()
+            .filter(|hit| hit.locator.kind == TraceNodeKind::RolloutRecord)
+            .count(),
+        1
+    );
+    assert_eq!(
+        trace
+            .search("conflicting observation")
+            .into_iter()
+            .filter(|hit| hit.locator.kind == TraceNodeKind::RolloutRecord)
+            .count(),
+        1
+    );
+}
+
+#[tokio::test]
 async fn selected_session_materialization_is_bounded_and_visible_as_a_diagnostic() {
     let temp = TempDir::new().unwrap();
     write_rollout(temp.path(), ROOT_ID, None, "bounded record", None);

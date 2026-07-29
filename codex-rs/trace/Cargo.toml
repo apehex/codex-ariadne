@@ -21,6 +21,7 @@ codex-rollout-trace = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 tokio = { workspace = true, features = ["fs", "io-util"] }
+zstd = { workspace = true }
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }

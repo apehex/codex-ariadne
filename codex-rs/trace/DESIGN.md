@@ -44,13 +44,17 @@ Reconciliation is additive:
 
 ## Bounds and performance
 
-`TraceLimits` bounds discovery, ordinary records, rich events and sizes, projected nodes, search fields, and search hits. A reached limit produces a diagnostic that explains the incomplete view.
+`TraceLimits` bounds discovery, ordinary record bytes, rich event count and bytes, semantic payload bytes, and projected nodes. Search independently caps hits, fields per node, and characters per field. A reached source or node limit produces a diagnostic that explains the incomplete view.
+
+Ordinary plain and compressed records and rich event lines are retained only up to their byte limit while the rest of an oversized line is discarded. Oversized or invalid UTF-8 records do not suppress a later valid record.
+
+Node admission is centralized in a graph builder. It applies the cap before mutation, preserves repeated identities with stable observation suffixes, remaps children to the latest retained parent observation, and reports incompatible observations without deleting either side.
 
 The selected trace is retained as a public node vector. `TraceIndex` provides a separately owned snapshot over that vector for locator lookup, roots, and parent-to-child adjacency. It builds in linear time, preserves node-vector order, provides expected constant-time selection before result iteration, and avoids duplicating graph semantics in consumers.
 
 The index is deliberately not embedded in `SessionTrace`: its public nodes and their structural fields remain mutable for compatibility, so a hidden cache could silently become stale. Consumers build one index per loaded session and must rebuild it after inserting, removing, or reordering nodes or changing a locator or parent. Existing `SessionTrace` lookup methods retain their signatures and scan behavior for compatibility; routine browser navigation should use `TraceIndex`.
 
-Rich replay is selected-root lazy but the upstream reducer is synchronous once invoked. An individual JSONL line can be allocated by the buffered reader before its configured size is rejected. Cooperative replay cancellation and chunk-bounded line reading are known hardening gaps.
+Rich replay is selected-root lazy but the reducer is synchronous once invoked. Cooperative cancellation inside an already-running reducer remains a hardening gap.
 
 ## Search
 
@@ -60,7 +64,7 @@ Search does not eagerly stringify every raw JSON value and does not currently in
 
 ## Payload access
 
-`RawPayloadHandle` defers bytes until the consumer requests them. `SafePayloadReader` canonicalizes the bundle root and candidate, rejects escape and non-regular files, enforces a display-size limit, decodes lossily where necessary, and sanitizes terminal control content.
+Semantic JSON payloads needed by rich reduction are read eagerly only for the selected bundle and have a separate replay byte limit. `RawPayloadHandle` defers display bytes until the consumer requests them. Both paths canonicalize the bundle root and candidate and reject absolute paths, lexical or symlink escape, and non-regular files; the display reader also decodes lossily and sanitizes terminal control content.
 
 Missing, rejected, unreadable, or oversized payloads are local failures. Their parent nodes and the rest of the trace remain navigable.
 

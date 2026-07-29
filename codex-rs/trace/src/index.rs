@@ -22,6 +22,7 @@ pub struct TraceIndex {
 }
 
 impl TraceIndex {
+    /// Builds deterministic position maps for one immutable session trace.
     pub fn new(trace: &SessionTrace) -> Self {
         let mut node_positions = HashMap::with_capacity(trace.nodes.len());
         let mut root_positions = Vec::new();
@@ -47,6 +48,7 @@ impl TraceIndex {
         }
     }
 
+    /// Looks up a retained node through its indexed position.
     pub fn node<'a>(
         &self,
         trace: &'a SessionTrace,
@@ -62,10 +64,10 @@ impl TraceIndex {
     /// immutable loaded trace. The same snapshot invalidation contract applies.
     pub fn node_position(&self, trace: &SessionTrace, locator: &TraceNodeLocator) -> Option<usize> {
         let position = *self.node_positions.get(locator)?;
-        let node = trace.nodes.get(position)?;
-        (node.locator == *locator).then_some(position)
+        trace.nodes.get(position).map(|_| position)
     }
 
+    /// Iterates root nodes in stable trace order.
     pub fn root_nodes<'a>(
         &'a self,
         trace: &'a SessionTrace,
@@ -77,16 +79,12 @@ impl TraceIndex {
     /// Returns compact positions for roots in source node order.
     pub fn root_positions<'a>(
         &'a self,
-        trace: &'a SessionTrace,
+        _trace: &'a SessionTrace,
     ) -> impl Iterator<Item = usize> + 'a {
-        self.root_positions.iter().copied().filter(|position| {
-            trace
-                .nodes
-                .get(*position)
-                .is_some_and(|node| node.parent.is_none())
-        })
+        self.root_positions.iter().copied()
     }
 
+    /// Iterates direct children in stable trace order.
     pub fn children<'a>(
         &'a self,
         trace: &'a SessionTrace,
@@ -99,7 +97,7 @@ impl TraceIndex {
     /// Returns compact positions for direct children in source node order.
     pub fn child_positions<'a>(
         &'a self,
-        trace: &'a SessionTrace,
+        _trace: &'a SessionTrace,
         parent: &'a TraceNodeLocator,
     ) -> impl Iterator<Item = usize> + 'a {
         self.child_positions
@@ -107,12 +105,6 @@ impl TraceIndex {
             .into_iter()
             .flatten()
             .copied()
-            .filter(|position| {
-                trace
-                    .nodes
-                    .get(*position)
-                    .is_some_and(|node| node.parent.as_ref() == Some(parent))
-            })
     }
 }
 

@@ -22,12 +22,6 @@ mod writer;
 
 /// Conventional reduced-state cache name written next to a raw trace bundle.
 pub use bundle::REDUCED_STATE_FILE_NAME;
-/// Trace bundle manifest schema version understood by this build.
-pub use bundle::TRACE_MANIFEST_SCHEMA_VERSION;
-/// Authoritative trace-bundle manifest metadata.
-pub use bundle::TraceBundleManifest;
-/// Read trace-bundle catalog metadata without replaying its raw event log.
-pub use bundle::read_bundle_manifest;
 /// No-op-capable handle for recording one code-mode runtime cell.
 pub use code_cell::CodeCellTraceContext;
 /// Raw checkpoint payload for a remote compaction install event.
@@ -66,6 +60,12 @@ pub use reducer::ReplayDiagnostic;
 pub use reducer::ReplayLimits;
 /// Best-effort reduced state plus event-level diagnostics.
 pub use reducer::ResilientReplay;
+/// Trace bundle manifest schema version understood by the inspection API.
+pub use reducer::TRACE_BUNDLE_SCHEMA_VERSION;
+/// Public metadata needed to catalog a trace bundle without replaying it.
+pub use reducer::TraceBundleMetadata;
+/// Read trace-bundle catalog metadata without replaying its raw event log.
+pub use reducer::inspect_bundle;
 /// Replay a raw trace bundle and write/read its reduced `RolloutTrace`.
 pub use reducer::replay_bundle;
 /// Replay a raw trace bundle while isolating malformed individual events.

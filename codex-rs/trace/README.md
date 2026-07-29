@@ -16,7 +16,7 @@ let session = catalog.load_session(session_id).await?;
 
 Each `TraceNode` carries a bounded `TraceRecordPresentation` for listing, styling, and visibility filters. `TraceNode::content_document()` extracts bounded semantic Markdown, text, JSON, or code without following a raw-payload reference; exact payload access remains explicitly lazy.
 
-The crate re-exports its public model from `src/model.rs`, trace index from `src/index.rs`, and contained payload reader from `src/payload.rs`.
+The crate explicitly re-exports its supported model types from `src/model.rs`, trace index from `src/index.rs`, and contained payload reader from `src/payload.rs`.
 
 ## Source pipeline
 
@@ -32,16 +32,16 @@ Discovery is metadata-oriented and does not eagerly reduce every rich bundle. Pr
 
 | File | Responsibility |
 | --- | --- |
-| `src/catalog.rs` | Repository configuration, discovery, selection, ordinary projection, and source reconciliation |
+| `src/catalog.rs` | Repository configuration, bounded discovery, selection, summaries, and source reconciliation |
+| `src/graph.rs` | Bounded node admission, duplicate preservation, parent remapping, and conflict diagnostics |
+| `src/ordinary.rs` | Bounded plain or compressed ordinary-record reading and projection |
 | `src/rich.rs` | Rich bundle reduction and normalized rich-node projection |
 | `src/model.rs` | Public catalog, node, locator, capability, evidence, limit, diagnostic, and search-result types |
-| `src/model_tests.rs` | Record classification, semantic content, newline, bound, and terminal-safety tests |
+| `src/presentation.rs` | Record classification and bounded semantic content documents |
 | `src/index.rs` | Snapshot index for locator lookup, root and child traversal, and compact node positions |
 | `src/search.rs` | Bounded attributed semantic search |
 | `src/payload.rs` | Canonically contained, size-limited, terminal-safe payload reads |
-| `src/index_tests.rs` | Index ordering, lookup, compact-position, and snapshot-invalidation tests |
-| `src/trace_tests.rs` | Ordinary, merged, discovery, graph, search, limit, and preservation tests |
-| `src/rich_tests.rs` | Rich projection, payload, malformed-input, and compatibility tests |
+| `src/*_tests.rs` | Sibling unit and integration evidence for each owning module |
 
 ## Development route
 

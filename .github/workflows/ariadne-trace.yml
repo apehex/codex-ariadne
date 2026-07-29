@@ -66,7 +66,7 @@ jobs:
 
       - name: Test trace model and TUI
         working-directory: codex-rs
-        run: cargo test --locked -p codex-trace -p codex-trace-tui
+        run: cargo test --locked -p codex-rollout-trace -p codex-trace -p codex-trace-tui
 
       - name: Test parent TUI trace renderer
         working-directory: codex-rs

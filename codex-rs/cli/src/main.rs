@@ -4210,6 +4210,14 @@ mod tests {
     }
 
     #[test]
+    fn trace_prompt_remains_available_after_the_option_terminator() {
+        let cli = MultitoolCli::try_parse_from(["codex", "--", "trace"])
+            .expect("literal trace prompt should parse");
+        assert!(cli.subcommand.is_none());
+        assert_eq!(cli.interactive.prompt.as_deref(), Some("trace"));
+    }
+
+    #[test]
     fn trace_command_rejects_session_and_bundle_together() {
         let result = MultitoolCli::try_parse_from([
             "codex",

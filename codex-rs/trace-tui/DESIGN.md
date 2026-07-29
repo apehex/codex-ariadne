@@ -16,9 +16,9 @@ catalog loading → root picker → selected-session loading → browser
                       └──────── error or back ───────────┘
 ```
 
-The picker owns selection and query state over catalog summaries. The browser owns a current container, a locator-based return stack, selection and viewport positions, detail mode and cache, visibility classes, search state, and lazily installed payload content.
+The picker owns precomputed normalized labels, cached query matches, selection, and query state over catalog summaries. The browser navigation controller owns a current container and locator-based return stack; sibling detail and search controllers own their caches, generations, visibility, and lazily installed payload content.
 
-Background results are tagged by their requested operation before they replace state. Cancellation or failure returns to the previous stable screen and exposes an error without installing a partial session.
+Background session and payload results carry their root-session identity, while search and detail results carry generations and complete view keys. Results replace state only when those identities remain current. Cancellation or failure returns to the previous stable screen and exposes an error without installing a partial session.
 
 ## Event loop
 
@@ -30,7 +30,7 @@ The current rich reducer is synchronous inside its background task. Aborting the
 
 ## Screens and layout
 
-The root picker shows bounded summary metadata and source badges without loading a full trace.
+The root picker shows bounded summary metadata and source badges without loading a full trace. Matching indexes are rebuilt only when a query changes, and each frame formats only the visible match window.
 
 The browser always renders one full-width surface: either the current container's direct children or full-screen detail for one record.
 

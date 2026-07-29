@@ -2,7 +2,7 @@
 
 Updated: 2026-07-29
 
-Status: open
+Status: closed; single-panel implementation completed and residual quality gates transferred
 
 ## Objective
 
@@ -16,7 +16,7 @@ Full-screen detail supports Rendered, Text, and Raw modes. Semantic decoding res
 
 ## Context
 
-The current browser maintains expansion state, a flattened tree, separate child selection, three panes, inspector scrolling, and width-dependent pane switching. The new model replaces these with a locator-based stack of single-level list states.
+Before this plan, the browser maintained expansion state, a flattened tree, separate child selection, three panes, inspector scrolling, and width-dependent pane switching. The implemented model replaces these with a locator-based stack of single-level list states.
 
 Rich reduction already preserves roles, channels, content parts, code languages, and raw-payload references; ordinary rollouts retain typed response items. Classification and content extraction belong in `codex-trace`, not in per-frame JSON parsing.
 
@@ -90,7 +90,7 @@ Keep complex implementation changes below 500 changed lines and non-mechanical c
 - Raw payloads remain lazy, contained, bounded, and terminal-safe.
 - Filtering is derived and reversible; visible and all-record search scopes behave distinctly and stale jobs cannot replace newer state.
 - The deterministic large-trace profile proves viewport-bounded repeated work and is invoked by configured CI.
-- Existing correctness, evidence, containment, byte-preservation, CLI compatibility, and cross-platform gates remain green.
+- Existing correctness, evidence, containment, byte-preservation, CLI compatibility, and cross-platform gates remain governed by their successor plans.
 
 ## Implementation progress
 
@@ -120,6 +120,12 @@ Keep complex implementation changes below 500 changed lines and non-mechanical c
 
 ## Closure
 
-Close after recording final API shapes, reconciliation diffs, movement sizes, exact validation commands, reviewed snapshots, interactive PTY observations, large-trace evidence, cross-platform workflow results, and deferred Vim-like successors.
+Implemented: typed record presentation; a single-panel, single-depth browser; locator-based descent and return; responsive metadata columns and previews; class-based visibility filters; visible and all-record search; generation-tagged background search and detail work; full-screen Rendered, Text, and Raw modes; a parent-TUI renderer adapter; reviewed snapshots; and an invoked deterministic 100,000-node profile.
+
+Validated locally: the recorded focused tests, snapshot review, parent-renderer tests, CLI parser tests, large-trace profile, interactive PTY exercise, byte-for-byte fixture comparison, scoped fixes, formatting, and Bazel lock regeneration passed as described above.
+
+Deferred: authoritative argument-comment linting remains blocked by the recorded Bazel target-enumeration failure; no external Linux, macOS, or Windows workflow has run on the candidate commit; and an automated offline/read-only PTY test is still required. Source admission, evidence preservation, bounded replay, picker scaling, lifecycle depth, coverage-ledger, documentation, compatibility, and focused-CI obligations are transferred to the open [trace-browser quality remediation plan](../open/2026-07-28-trace-browser-quality-remediation.md).
+
+The future structure-derived conversation fixture remains governed by the open [fixture plan](../open/2026-07-29-structure-derived-conversation-fixture.md). Deferred Vim-like navigation, configuration, live `/trace`, and investigation features remain outside this completed plan.
 
 No push, tag, release, repository-setting change, persisted configuration, external publication, or live `/trace` integration is authorized.

@@ -1,8 +1,12 @@
 //! Offline, read-only Ratatui browser for local Codex execution traces.
 
+#![warn(missing_docs)]
+
 mod app;
 mod browser;
+mod input;
 mod jobs;
+mod picker;
 mod render;
 mod view;
 
@@ -159,9 +163,9 @@ async fn run_event_loop(
 fn apply_worker_result(app: &mut App, result: WorkerResult) -> AppAction {
     match result {
         WorkerResult::Catalog(catalog) => app.install_catalog(catalog),
-        WorkerResult::Session(result) => match *result {
+        WorkerResult::Session { session_id, result } => match *result {
             Ok(browser) => {
-                app.install_browser(browser);
+                app.install_browser(&session_id, browser);
                 AppAction::None
             }
             Err(error) => {
@@ -169,8 +173,12 @@ fn apply_worker_result(app: &mut App, result: WorkerResult) -> AppAction {
                 AppAction::None
             }
         },
-        WorkerResult::Payload { id, result } => {
-            app.install_payload(id, result);
+        WorkerResult::Payload {
+            session_id,
+            id,
+            result,
+        } => {
+            app.install_payload(&session_id, id, result);
             AppAction::None
         }
         WorkerResult::Detail(result) => {
@@ -210,18 +218,27 @@ fn dispatch_action(
             };
             let (options, renderer) = app.browser_visuals();
             jobs.push(tokio::spawn(async move {
-                WorkerResult::Session(Box::new(
-                    catalog
-                        .load_session(&id)
-                        .await
-                        .map(|trace| BrowserState::with_visuals(trace, options, renderer)),
-                ))
+                WorkerResult::Session {
+                    session_id: id.clone(),
+                    result: Box::new(
+                        catalog
+                            .load_session(&id)
+                            .await
+                            .map(|trace| BrowserState::with_visuals(trace, options, renderer)),
+                    ),
+                }
             }));
             false
         }
-        AppAction::ReadPayload { id, handle, limit } => {
+        AppAction::ReadPayload {
+            session_id,
+            id,
+            handle,
+            limit,
+        } => {
             jobs.push(tokio::spawn(async move {
                 WorkerResult::Payload {
+                    session_id,
                     id,
                     result: handle.read(limit).await,
                 }
@@ -278,8 +295,12 @@ fn normalize_trace_root(path: &Path) -> Result<PathBuf> {
 
 enum WorkerResult {
     Catalog(TraceCatalog),
-    Session(Box<Result<BrowserState>>),
+    Session {
+        session_id: String,
+        result: Box<Result<BrowserState>>,
+    },
     Payload {
+        session_id: String,
         id: String,
         result: Result<SanitizedPayload>,
     },

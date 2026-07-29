@@ -437,11 +437,28 @@ async fn enter_requests_raw_payload_without_eagerly_reading_it() {
     app.install_session(trace);
     app.handle_key(key(KeyCode::Down));
     assert_snapshot!("raw_payload_collapsed", render_app(&mut app, 100, 24));
-    let AppAction::ReadPayload { id, handle, limit } = app.handle_key(key(KeyCode::Enter)) else {
+    let AppAction::ReadPayload {
+        session_id,
+        id,
+        handle,
+        limit,
+    } = app.handle_key(key(KeyCode::Enter))
+    else {
         panic!("expected lazy raw payload request");
     };
     let observed = handle.read(limit).await.unwrap();
     app.install_payload(
+        "different-session",
+        id.clone(),
+        Ok(SanitizedPayload {
+            text: "stale payload".to_string(),
+            truncated: false,
+            original_bytes_read: 13,
+        }),
+    );
+    assert!(render_app(&mut app, 100, 24).contains("loading exact raw artifact"));
+    app.install_payload(
+        &session_id,
         id.clone(),
         Ok(SanitizedPayload {
             text: format!(
@@ -460,7 +477,11 @@ async fn enter_requests_raw_payload_without_eagerly_reading_it() {
     browser.detail_scroll = 20;
     let large_render = render_app(&mut app, 100, 24);
     assert!(!large_render.contains("TAIL-MUST-NOT-BE-EAGER"));
-    app.install_payload(id, Err(anyhow::anyhow!("bad \u{1b}[31m payload\u{7} path")));
+    app.install_payload(
+        &session_id,
+        id,
+        Err(anyhow::anyhow!("bad \u{1b}[31m payload\u{7} path")),
+    );
     let rendered = render_app(&mut app, 100, 24);
     assert!(!rendered.contains('\u{1b}'));
     assert_snapshot!("raw_payload_failure_sanitized", rendered);

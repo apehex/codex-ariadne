@@ -6,25 +6,25 @@ use std::path::PathBuf;
 use anyhow::Context;
 use anyhow::Result;
 use chrono::DateTime;
-use codex_protocol::protocol::RolloutItem;
 use codex_rollout::ARCHIVED_SESSIONS_SUBDIR;
 use codex_rollout::SESSIONS_SUBDIR;
 
-use crate::CatalogEntry;
 use crate::EvidenceGrade;
-use crate::OrdinaryThread;
-use crate::RichBundle;
 use crate::SessionSummary;
 use crate::SessionTrace;
 use crate::TraceCapabilities;
 use crate::TraceCatalog;
 use crate::TraceDiagnostic;
+use crate::TraceGraphBuilder;
 use crate::TraceLimits;
 use crate::TraceNode;
 use crate::TraceNodeKind;
 use crate::TraceNodeLocator;
 use crate::TraceSourceKind;
 use crate::TraceStatus;
+use crate::model::CatalogEntry;
+use crate::model::OrdinaryThread;
+use crate::model::RichBundle;
 
 /// Read-only entry point for discovering ordinary and rich local traces.
 #[derive(Debug, Clone)]
@@ -71,6 +71,7 @@ impl TraceRepository {
     pub async fn discover(&self) -> TraceCatalog {
         let mut diagnostics = Vec::new();
         let mut threads = BTreeMap::<String, OrdinaryThread>::new();
+        let mut ordinary_observations = Vec::new();
         for (root, archived) in &self.ordinary_roots {
             for path in discover_files(
                 root,
@@ -92,17 +93,21 @@ impl TraceRepository {
                             model_provider: line.meta.model_provider,
                             archived: *archived,
                         };
-                        if let Some(previous) = threads.insert(thread_id.clone(), thread) {
+                        if let Some(previous) = threads.get(&thread_id)
+                            && !same_ordinary_observation(previous, &thread)
+                        {
                             diagnostics.push(TraceDiagnostic {
                                 locator: None,
-                                path: Some(path),
-                                evidence: EvidenceGrade::Unavailable,
+                                path: Some(path.clone()),
+                                evidence: EvidenceGrade::Conflicting,
                                 message: format!(
-                                    "duplicate ordinary rollout for thread {thread_id}; replaced {}",
+                                    "conflicting ordinary rollout for thread {thread_id}; retained separately from {}",
                                     previous.path.display()
                                 ),
                             });
                         }
+                        threads.entry(thread_id).or_insert_with(|| thread.clone());
+                        ordinary_observations.push(thread);
                     }
                     Err(error) => diagnostics.push(TraceDiagnostic {
                         locator: None,
@@ -115,7 +120,7 @@ impl TraceRepository {
         }
 
         let mut entries = BTreeMap::<String, CatalogEntry>::new();
-        for thread in threads.values() {
+        for thread in &ordinary_observations {
             let root_id = resolve_root(thread, &threads, &mut diagnostics);
             entries
                 .entry(root_id)
@@ -141,10 +146,9 @@ impl TraceRepository {
         bundle_paths.sort();
         bundle_paths.dedup();
         for path in bundle_paths {
-            match codex_rollout_trace::read_bundle_manifest(&path) {
+            match codex_rollout_trace::inspect_bundle(&path) {
                 Ok(manifest) => {
-                    if manifest.schema_version != codex_rollout_trace::TRACE_MANIFEST_SCHEMA_VERSION
-                    {
+                    if manifest.schema_version != codex_rollout_trace::TRACE_BUNDLE_SCHEMA_VERSION {
                         diagnostics.push(TraceDiagnostic {
                             locator: None,
                             path: Some(path.clone()),
@@ -152,7 +156,7 @@ impl TraceRepository {
                             message: format!(
                                 "rich trace manifest schema {} differs from supported schema {}",
                                 manifest.schema_version,
-                                codex_rollout_trace::TRACE_MANIFEST_SCHEMA_VERSION
+                                codex_rollout_trace::TRACE_BUNDLE_SCHEMA_VERSION
                             ),
                         });
                     }
@@ -180,20 +184,24 @@ impl TraceRepository {
                             ),
                         });
                     }
-                    if let Some(previous) = entry.rich.replace(RichBundle {
+                    let bundle = RichBundle {
                         path: path.clone(),
                         manifest,
-                    }) {
+                    };
+                    if let Some(previous) = entry.rich.first()
+                        && previous.manifest != bundle.manifest
+                    {
                         diagnostics.push(TraceDiagnostic {
                             locator: None,
-                            path: Some(path),
+                            path: Some(path.clone()),
                             evidence: EvidenceGrade::Conflicting,
                             message: format!(
-                                "multiple rich bundles for rollout; replaced {}",
+                                "conflicting rich bundle retained separately from {}",
                                 previous.path.display()
                             ),
                         });
                     }
+                    entry.rich.push(bundle);
                 }
                 Err(error) => diagnostics.push(TraceDiagnostic {
                     locator: None,
@@ -226,17 +234,16 @@ impl TraceCatalog {
             .get(session_id)
             .with_context(|| format!("unknown trace session {session_id}"))?;
         let mut summary = summarize(session_id, entry);
-        let mut nodes = BTreeMap::new();
-        let mut diagnostics = self
+        let diagnostics = self
             .diagnostics
             .iter()
             .filter(|diagnostic| diagnostic_belongs_to(diagnostic, entry))
             .cloned()
             .collect::<Vec<_>>();
+        let mut graph = TraceGraphBuilder::new(self.limits.max_nodes_per_session, diagnostics);
         let session_locator = TraceNodeLocator::new(session_id, TraceNodeKind::Session, session_id);
         let session_detail = serde_json::to_value(&summary)?;
-        nodes.insert(
-            session_locator.clone(),
+        graph.admit(
             TraceNode {
                 locator: session_locator.clone(),
                 parent: None,
@@ -250,69 +257,76 @@ impl TraceCatalog {
                 ),
                 detail: session_detail,
             },
+            /*source_path*/ None,
         );
+        if graph.is_empty() {
+            let (nodes, diagnostics) = graph.finish();
+            return Ok(SessionTrace {
+                summary,
+                nodes,
+                diagnostics,
+                payloads: BTreeMap::new(),
+            });
+        }
         for thread in &entry.ordinary {
-            load_ordinary_thread(
+            crate::ordinary::load_thread(
                 session_id,
                 thread,
                 &session_locator,
                 &entry.ordinary,
                 self.limits,
-                &mut nodes,
-                &mut diagnostics,
+                &mut graph,
             )
             .await;
         }
         let mut payloads = BTreeMap::new();
-        if let Some(bundle) = &entry.rich {
+        for (bundle_index, bundle) in entry.rich.iter().enumerate() {
             let replay = codex_rollout_trace::replay_bundle_resilient_with_limits(
                 &bundle.path,
-                codex_rollout_trace::ReplayLimits {
-                    max_events: self.limits.max_rich_events,
-                    max_event_bytes: self.limits.max_rich_event_bytes,
-                },
+                codex_rollout_trace::ReplayLimits::default()
+                    .max_events(self.limits.max_rich_events)
+                    .max_event_bytes(self.limits.max_rich_event_bytes)
+                    .max_semantic_payload_bytes(self.limits.max_rich_semantic_payload_bytes),
             )
             .with_context(|| format!("replay rich trace {}", bundle.path.display()))?;
-            summary.thread_count = Some(replay.trace.threads.len());
-            summary.status = rich_status(&replay.trace.status);
-            diagnostics.extend(
-                replay
-                    .diagnostics
-                    .into_iter()
-                    .map(|diagnostic| TraceDiagnostic {
-                        locator: None,
-                        path: Some(bundle.path.join("trace.jsonl")),
-                        evidence: EvidenceGrade::Unavailable,
-                        message: diagnostic.line.map_or_else(
-                            || diagnostic.message.clone(),
-                            |line| format!("rich trace line {line}: {}", diagnostic.message),
-                        ),
-                    }),
-            );
+            if bundle_index == 0 {
+                summary.thread_count = Some(replay.trace.threads.len());
+                summary.status = rich_status(&replay.trace.status);
+            }
+            for diagnostic in replay.diagnostics {
+                graph.record_diagnostic(TraceDiagnostic {
+                    locator: None,
+                    path: Some(bundle.path.join(&bundle.manifest.raw_event_log)),
+                    evidence: EvidenceGrade::Unavailable,
+                    message: diagnostic.line.map_or_else(
+                        || diagnostic.message.clone(),
+                        |line| format!("rich trace line {line}: {}", diagnostic.message),
+                    ),
+                });
+            }
             crate::rich::project_rich(
                 session_id,
                 &bundle.path,
                 &replay.trace,
                 replay.semantically_complete,
-                self.limits.max_nodes_per_session,
                 &session_locator,
-                &mut nodes,
+                &mut graph,
                 &mut payloads,
-                &mut diagnostics,
             )?;
-            if let Some(session) = nodes.get_mut(&session_locator) {
-                session.detail = serde_json::to_value(&summary)?;
-                session.presentation = crate::TraceRecordPresentation::from_detail(
-                    TraceNodeKind::Session,
-                    &session.detail,
-                );
-            }
+        }
+        if let Some(session) = graph.node_mut(&session_locator) {
+            session.detail = serde_json::to_value(&summary)?;
+            session.presentation = crate::TraceRecordPresentation::from_detail(
+                TraceNodeKind::Session,
+                &session.detail,
+            );
         }
         let remaining_diagnostic_nodes = self
             .limits
             .max_nodes_per_session
-            .saturating_sub(nodes.len());
-        for (index, diagnostic) in diagnostics
+            .saturating_sub(graph.len());
+        let diagnostics_for_nodes = graph.diagnostics().to_vec();
+        for (index, diagnostic) in diagnostics_for_nodes
             .iter()
             .take(remaining_diagnostic_nodes)
             .enumerate()
@@ -323,8 +337,7 @@ impl TraceCatalog {
                 format!("diagnostic:{index}"),
             );
             let detail = serde_json::to_value(diagnostic)?;
-            nodes.insert(
-                locator.clone(),
+            graph.admit(
                 TraceNode {
                     locator,
                     parent: Some(session_locator.clone()),
@@ -338,189 +351,16 @@ impl TraceCatalog {
                     ),
                     detail,
                 },
+                diagnostic.path.as_deref(),
             );
         }
+        let (nodes, diagnostics) = graph.finish();
         Ok(SessionTrace {
             summary,
-            nodes: nodes.into_values().collect(),
+            nodes,
             diagnostics,
             payloads,
         })
-    }
-}
-
-async fn load_ordinary_thread(
-    session_id: &str,
-    thread: &OrdinaryThread,
-    session_locator: &TraceNodeLocator,
-    ordinary_threads: &[OrdinaryThread],
-    limits: TraceLimits,
-    nodes: &mut BTreeMap<TraceNodeLocator, TraceNode>,
-    diagnostics: &mut Vec<TraceDiagnostic>,
-) {
-    let thread_locator = ordinary_thread_locator(session_id, &thread.thread_id);
-    let parent = thread
-        .parent_thread_id
-        .as_ref()
-        .filter(|_| parent_is_reachable(thread, ordinary_threads))
-        .map(|id| ordinary_thread_locator(session_id, id))
-        .unwrap_or_else(|| session_locator.clone());
-    let thread_label = format!("thread {}", thread.thread_id);
-    let thread_detail = serde_json::json!({
-        "thread_id": thread.thread_id,
-        "path": thread.path,
-        "cwd": thread.cwd,
-        "model_provider": thread.model_provider,
-        "archived": thread.archived,
-        "original_parent_thread_id": thread.parent_thread_id,
-    });
-    nodes
-        .entry(thread_locator.clone())
-        .or_insert_with(|| TraceNode {
-            locator: thread_locator.clone(),
-            parent: Some(parent),
-            provenance: TraceSourceKind::Ordinary,
-            evidence: EvidenceGrade::Semantic,
-            timestamp: Some(thread.timestamp.clone()),
-            label: thread_label.clone(),
-            presentation: crate::TraceRecordPresentation::from_detail(
-                TraceNodeKind::Thread,
-                &thread_detail,
-            ),
-            detail: thread_detail,
-        });
-
-    let mut reader = match codex_rollout::open_rollout_line_reader(&thread.path).await {
-        Ok(reader) => reader,
-        Err(error) => {
-            diagnostics.push(path_diagnostic(
-                &thread.path,
-                format!("cannot open rollout: {error}"),
-            ));
-            return;
-        }
-    };
-    let mut line_index = 0_u64;
-    loop {
-        let line = match reader.next_line().await {
-            Ok(Some(line)) => line,
-            Ok(None) => break,
-            Err(error) => {
-                diagnostics.push(path_diagnostic(
-                    &thread.path,
-                    format!("cannot read rollout line: {error}"),
-                ));
-                break;
-            }
-        };
-        line_index += 1;
-        if line.trim().is_empty() {
-            continue;
-        }
-        if diagnostics.len() >= limits.max_nodes_per_session {
-            break;
-        }
-        if line.len() > limits.max_ordinary_record_bytes {
-            diagnostics.push(path_diagnostic(
-                &thread.path,
-                format!(
-                    "rollout record at line {line_index} exceeds {} byte display limit",
-                    limits.max_ordinary_record_bytes
-                ),
-            ));
-            continue;
-        }
-        if nodes.len() >= limits.max_nodes_per_session {
-            diagnostics.push(path_diagnostic(
-                &thread.path,
-                format!(
-                    "session node materialization stopped at {} nodes",
-                    limits.max_nodes_per_session
-                ),
-            ));
-            break;
-        }
-        let value = match serde_json::from_str::<serde_json::Value>(&line) {
-            Ok(value) => value,
-            Err(error) => {
-                diagnostics.push(path_diagnostic(
-                    &thread.path,
-                    format!("malformed JSON at line {line_index}: {error}"),
-                ));
-                continue;
-            }
-        };
-        let typed = serde_json::from_value::<codex_protocol::protocol::RolloutLine>(value.clone());
-        let (kind, label) = match typed {
-            Ok(line) => ordinary_kind(&line.item),
-            Err(error) => {
-                diagnostics.push(path_diagnostic(
-                    &thread.path,
-                    format!("unknown rollout record at line {line_index}: {error}"),
-                ));
-                (TraceNodeKind::RolloutRecord, "unknown record")
-            }
-        };
-        let ordinal = value
-            .get("ordinal")
-            .and_then(serde_json::Value::as_u64)
-            .unwrap_or(line_index);
-        let locator = TraceNodeLocator::new(
-            session_id,
-            kind,
-            format!("ordinary:{}:{ordinal}", thread.thread_id),
-        );
-        nodes.insert(
-            locator.clone(),
-            TraceNode {
-                locator,
-                parent: Some(thread_locator.clone()),
-                provenance: TraceSourceKind::Ordinary,
-                evidence: EvidenceGrade::Semantic,
-                timestamp: value
-                    .get("timestamp")
-                    .and_then(serde_json::Value::as_str)
-                    .map(str::to_owned),
-                label: label.to_string(),
-                presentation: crate::TraceRecordPresentation::from_detail(kind, &value),
-                detail: value,
-            },
-        );
-    }
-}
-
-fn parent_is_reachable(thread: &OrdinaryThread, threads: &[OrdinaryThread]) -> bool {
-    let by_id = threads
-        .iter()
-        .map(|thread| (thread.thread_id.as_str(), thread))
-        .collect::<BTreeMap<_, _>>();
-    let mut next = thread.parent_thread_id.as_deref();
-    let mut seen = BTreeSet::new();
-    while let Some(id) = next {
-        if !seen.insert(id) {
-            return false;
-        }
-        let Some(parent) = by_id.get(id) else {
-            return false;
-        };
-        next = parent.parent_thread_id.as_deref();
-    }
-    true
-}
-
-fn ordinary_kind(item: &RolloutItem) -> (TraceNodeKind, &'static str) {
-    match item {
-        RolloutItem::SessionMeta(_) => (TraceNodeKind::RolloutRecord, "session metadata"),
-        RolloutItem::ResponseItem(_) | RolloutItem::InterAgentCommunication(_) => {
-            (TraceNodeKind::ConversationItem, "conversation item")
-        }
-        RolloutItem::InterAgentCommunicationMetadata { .. } => {
-            (TraceNodeKind::RolloutRecord, "agent communication metadata")
-        }
-        RolloutItem::Compacted(_) => (TraceNodeKind::Compaction, "context compaction"),
-        RolloutItem::TurnContext(_) => (TraceNodeKind::Turn, "turn context"),
-        RolloutItem::WorldState(_) => (TraceNodeKind::RolloutRecord, "world state"),
-        RolloutItem::EventMsg(_) => (TraceNodeKind::RolloutRecord, "event"),
     }
 }
 
@@ -530,7 +370,7 @@ fn summarize(session_id: &str, entry: &CatalogEntry) -> SessionSummary {
         .iter()
         .find(|thread| thread.parent_thread_id.is_none())
         .or_else(|| entry.ordinary.first());
-    let source = match (entry.ordinary.is_empty(), entry.rich.is_some()) {
+    let source = match (entry.ordinary.is_empty(), !entry.rich.is_empty()) {
         (false, false) => TraceSourceKind::Ordinary,
         (true, true) => TraceSourceKind::Rich,
         (false, true) => TraceSourceKind::Merged,
@@ -541,7 +381,7 @@ fn summarize(session_id: &str, entry: &CatalogEntry) -> SessionSummary {
         TraceSourceKind::Rich => TraceCapabilities::RICH,
         TraceSourceKind::Merged => TraceCapabilities::ORDINARY.union(TraceCapabilities::RICH),
     };
-    let rich = entry.rich.as_ref().map(|bundle| &bundle.manifest);
+    let rich = entry.rich.first().map(|bundle| &bundle.manifest);
     SessionSummary {
         session_id: session_id.to_string(),
         root_thread_id: rich
@@ -701,14 +541,6 @@ fn path_diagnostic(path: &Path, message: String) -> TraceDiagnostic {
     }
 }
 
-fn ordinary_thread_locator(session_id: &str, thread_id: &str) -> TraceNodeLocator {
-    TraceNodeLocator::new(
-        session_id,
-        TraceNodeKind::Thread,
-        format!("ordinary:{thread_id}"),
-    )
-}
-
 fn diagnostic_belongs_to(diagnostic: &TraceDiagnostic, entry: &CatalogEntry) -> bool {
     let Some(path) = diagnostic.path.as_ref() else {
         return false;
@@ -716,19 +548,29 @@ fn diagnostic_belongs_to(diagnostic: &TraceDiagnostic, entry: &CatalogEntry) -> 
     entry.ordinary.iter().any(|thread| thread.path == *path)
         || entry
             .rich
-            .as_ref()
-            .is_some_and(|bundle| path.starts_with(&bundle.path))
+            .iter()
+            .any(|bundle| path.starts_with(&bundle.path))
 }
 
 fn diagnostic_provenance(diagnostic: &TraceDiagnostic, entry: &CatalogEntry) -> TraceSourceKind {
     if diagnostic.path.as_ref().is_some_and(|path| {
         entry
             .rich
-            .as_ref()
-            .is_some_and(|bundle| path.starts_with(&bundle.path))
+            .iter()
+            .any(|bundle| path.starts_with(&bundle.path))
     }) {
         TraceSourceKind::Rich
     } else {
         TraceSourceKind::Ordinary
     }
+}
+
+/// Compares ordinary trace metadata while ignoring the duplicate source path.
+fn same_ordinary_observation(left: &OrdinaryThread, right: &OrdinaryThread) -> bool {
+    left.thread_id == right.thread_id
+        && left.parent_thread_id == right.parent_thread_id
+        && left.timestamp == right.timestamp
+        && left.cwd == right.cwd
+        && left.model_provider == right.model_provider
+        && left.archived == right.archived
 }

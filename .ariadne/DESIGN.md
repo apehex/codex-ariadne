@@ -69,7 +69,7 @@ The picker reads metadata only. Root loading and payload reads run outside the t
 
 The target design does not format, wrap, clone, or scan an entire selected trace on every frame. Render paths consume precomputed summaries, visible windows, and cached detail representations. Work that grows with total trace size belongs in background loading or explicit search, with progress and cancellation.
 
-The current V1 reducer can still perform synchronous rich replay once started, and existing readers may read one complete JSONL line before enforcing a record-size limit. These are explicit hardening gaps, not guarantees that the UI may rely on.
+The current reducer can still perform synchronous rich replay once started. Ordinary and rich inspection readers enforce record bounds while consuming each line, so the TUI may rely on bounded retained record memory but not cooperative cancellation within a reducer call.
 
 ## Privacy and containment
 

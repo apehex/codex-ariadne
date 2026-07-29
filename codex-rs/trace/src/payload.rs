@@ -12,12 +12,15 @@ use tokio::io::AsyncReadExt;
 pub struct PayloadReadLimit(usize);
 
 impl PayloadReadLimit {
+    /// Default one-megabyte raw display window.
     pub const DEFAULT: Self = Self(1024 * 1024);
 
+    /// Creates an explicit maximum byte window.
     pub fn new(bytes: usize) -> Self {
         Self(bytes)
     }
 
+    /// Returns the configured maximum byte count.
     pub fn bytes(self) -> usize {
         self.0
     }
@@ -26,8 +29,11 @@ impl PayloadReadLimit {
 /// Terminal-safe, lossy UTF-8 view of a raw payload.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SanitizedPayload {
+    /// UTF-8 lossy text with unsafe terminal controls removed.
     pub text: String,
+    /// Whether the source exceeded the requested byte window.
     pub truncated: bool,
+    /// Number of source bytes retained before text sanitization.
     pub original_bytes_read: usize,
 }
 
@@ -38,10 +44,12 @@ pub struct SafePayloadReader {
 }
 
 impl SafePayloadReader {
+    /// Creates a reader contained beneath one bundle root.
     pub fn new(bundle_root: PathBuf) -> Self {
         Self { bundle_root }
     }
 
+    /// Reads one referenced regular file through a bounded display window.
     pub async fn read(
         &self,
         reference: &RawPayloadRef,

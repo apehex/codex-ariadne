@@ -1,17 +1,17 @@
 use pretty_assertions::assert_eq;
 use serde_json::json;
 
-use super::EvidenceGrade;
-use super::TraceContentDocument;
-use super::TraceContentFormat;
-use super::TraceNode;
-use super::TraceNodeKind;
-use super::TraceNodeLocator;
-use super::TraceRecordChannel;
-use super::TraceRecordClass;
-use super::TraceRecordPresentation;
-use super::TraceRecordRole;
-use super::TraceSourceKind;
+use crate::EvidenceGrade;
+use crate::TraceContentDocument;
+use crate::TraceContentFormat;
+use crate::TraceNode;
+use crate::TraceNodeKind;
+use crate::TraceNodeLocator;
+use crate::TraceRecordChannel;
+use crate::TraceRecordClass;
+use crate::TraceRecordPresentation;
+use crate::TraceRecordRole;
+use crate::TraceSourceKind;
 
 #[test]
 fn ordinary_user_record_has_semantic_presentation_and_unescaped_content() {

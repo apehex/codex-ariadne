@@ -113,33 +113,5 @@ fn pointer_or_root(path: &str) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use serde_json::json;
-
-    use super::*;
-    use crate::EvidenceGrade;
-    use crate::TraceNodeKind;
-    use crate::TraceNodeLocator;
-    use crate::TraceSourceKind;
-
-    #[test]
-    fn search_attributes_the_field_and_centers_the_match() {
-        let node = TraceNode {
-            locator: TraceNodeLocator::new("session", TraceNodeKind::Turn, "turn"),
-            parent: None,
-            provenance: TraceSourceKind::Ordinary,
-            evidence: EvidenceGrade::Semantic,
-            timestamp: None,
-            label: "turn".to_string(),
-            presentation: Default::default(),
-            detail: json!({"payload": {"message": format!("{}needle{}", "a".repeat(100), "b".repeat(100))}}),
-        };
-        let hit = search_nodes(&[node], "needle").pop().unwrap();
-        assert_eq!(hit.field, "/payload/message");
-        assert_eq!(hit.match_range, 100..106);
-        assert!(hit.snippet.starts_with('a'));
-        assert!(hit.snippet.contains("needle"));
-        assert!(hit.snippet.ends_with('b'));
-        assert!(hit.snippet.len() < 200);
-    }
-}
+#[path = "search_tests.rs"]
+mod tests;

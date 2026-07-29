@@ -1,6 +1,6 @@
 # Trace Browser Quality Remediation
 
-Updated: 2026-07-28
+Updated: 2026-07-29
 
 Status: open
 
@@ -21,28 +21,35 @@ Completion means another operator can reproduce the evidence below without using
 
 The quality review was performed against `.ariadne/doctrine/quality.md`, the root `AGENTS.md`, and the local design contracts in `codex-rs/trace/DESIGN.md` and `codex-rs/trace-tui/DESIGN.md`. It found no model-visible context mutation, app-server API change, configuration compatibility change, or rollout-resume regression. Those surfaces must remain outside this remediation unless a separate accepted plan expands the scope.
 
-The existing `.ariadne/plans/open/2026-07-28-credible-historical-trace-browser.md` records useful implementation and performance evidence, but it remains open and does not waive the findings below. This plan is a successor quality gate for that candidate. Do not close either plan or repeat its public-readiness claims until this plan's correctness, responsiveness, compatibility, and CI evidence is recorded.
+The existing `.ariadne/plans/open/2026-07-28-credible-historical-trace-browser.md` records useful implementation and performance evidence, but it remains open and does not waive the findings below. The [closed single-panel plan](../closed/2026-07-28-single-panel-trace-browser.md) records the completed UI redesign and transfers its residual gates here. This plan is the successor quality gate for that candidate. Do not close it or repeat its public-readiness claims until this plan's correctness, responsiveness, compatibility, and CI evidence is recorded.
 
-The review's local baseline was:
+The current local baseline is:
 
-- `just test -p codex-trace -p codex-trace-tui`: 20 tests passed and one performance profile was ignored;
-- `just test -p codex-rollout-trace`: 70 tests passed;
-- the focused CLI trace tests passed;
-- no pending trace-TUI snapshots were present;
-- the fork differed from its upstream base by more than 8,000 lines, so remediation must be split into independently reviewable changes.
+- `just test -p codex-trace`: 19 tests passed;
+- `just test -p codex-trace-tui`: 11 tests passed, and no pending snapshots were present;
+- three focused parent-renderer tests and two focused CLI trace tests passed;
+- the deterministic 100,000-node profile is invoked by the focused Linux workflow and passed locally within its recorded latency gates;
+- manual offline/read-only PTY validation passed with unchanged fixture hashes;
+- the fork differs from `upstream/main` by 82 files and 10,532 changed lines, while the single-panel commit alone changes 4,593 lines.
 
-Passing this baseline does not cover the missing invariants. In particular:
+The post-single-panel audit resolved the obsolete fold/pane architecture, synchronous search, stale search/detail installation, missing parent renderer, ignored performance-profile workflow, and over-800-line browser findings. It found no model-visible context mutation, app-server or raw-response API change, configuration-schema change, rich-bundle schema change, or rollout-resume regression.
 
-1. Ordinary catalog entries can be inserted before the configured node cap is checked.
-2. Rich sessions can be admitted before their parent operation, leaving an orphaned terminal node when the cap is reached.
-3. Repeated ordinary and rich observations sharing an identity can overwrite one another instead of preserving both pieces of evidence.
-4. Rich replay can eagerly read referenced JSON payloads without the display payload byte bound.
-5. Bundle manifests describe a configurable raw event log, while replay still assumes `trace.jsonl`.
-6. Search runs synchronously from the TUI input loop, and the initial picker can scan and format the full catalog on each frame.
-7. Adding a top-level `trace` subcommand consumes an input that previously started an interactive prompt; unlike other protected command words, this compatibility change has no explicit disposition.
-8. Rich projection, lifecycle races, payload containment, search bounds, browser interactions, presentation states, and real offline/read-only CLI behavior lack sufficient automated coverage.
-9. The deterministic 100,000-node profile is ignored in routine tests, and the focused workflow does not run `codex-rollout-trace`.
-10. The TUI browser module exceeds the repository's large-module threshold, public exports and docs are broader or thinner than necessary, a new Rust test module is inline, opaque positional test arguments are undocumented, and the Python demo uses a disallowed `__future__` import and lacks docstrings.
+Existing evidence worth preserving includes focused `TraceIndex` ordering and rebuild tests; ordinary tree, orphan, cycle, malformed-rich, root-conflict, lazy-discovery, and basic payload-containment coverage; semantic rendering, UTF-8 truncation, and terminal-control tests; and baseline single-panel snapshots and state tests for descent, filtering, search scopes, hidden-hit reveal, stale-result rejection, help, and lazy payload failure.
+
+Passing this baseline does not cover the remaining invariants:
+
+1. Session and ordinary-thread nodes are inserted before the cap checks at `trace/src/catalog.rs:238`, `:377`, and `:433`; `next_line` also allocates the complete ordinary record before its byte check at `:405-423`. Rich terminal sessions are projected before their parent operations at `trace/src/rich.rs:222` and `:238`. Zero, exact, plus-one, diagnostic-at-limit, and every-parent-boundary tests are absent.
+2. Duplicate ordinary sessions and rich bundles can replace prior discoveries at `trace/src/catalog.rs:95` and `:183`, while repeated projected locators overwrite at `trace/src/rich.rs:287`. Identical and conflicting evidence lacks preservation, stable ordering, diagnostics, and deep whole-graph tests.
+3. Rich replay ignores `manifest.raw_event_log` at `rollout-trace/src/reducer/mod.rs:120`, allocates a complete event line before its byte check at `:127-143`, stops after invalid UTF-8 at `:129-138`, and reads semantic JSON payloads without a byte bound at `:272-279`.
+4. Search is generation-tagged and asynchronous, but the caps at `trace/src/search.rs:6-8` have only the happy-path test at `:125`. Their exact and over-limit behavior for Unicode, controls, JSON pointers, case behavior, and empty queries remains unproved.
+5. Picker matching and row preparation scan and allocate for the complete catalog on each frame at `trace-tui/src/app.rs:555-578` and `trace-tui/src/render.rs:114-134`; the large-trace profile at `trace-tui/src/render_tests.rs:470` covers browser navigation rather than picker structure.
+6. Async lifecycle coverage contains stale-mode and stale-query tests at `trace-tui/src/render_tests.rs:291` and `:363`, but omits cancellation, replacement, shutdown, worker failure, session changes, stale width and payload work, and cross-session payload completion. Completed payloads are forwarded without session identity at `trace-tui/src/app.rs:150` and installed by the current browser at `trace-tui/src/browser.rs:413`.
+7. The rich integration test at `trace/src/trace_tests.rs:278-352` covers only a thread and raw payload, leaving the projection branches at `trace/src/rich.rs:66-149` and `:182-266` shallowly tested. Complete merged evidence, single-panel navigation, Text and successful Raw modes, payload truncation notices, Unicode and control input, failed or interrupted traces, and several semantic node families also lack deep assertions or snapshots.
+8. CLI coverage at `cli/src/main.rs:4176-4193` remains parser-only. The top-level variant at `cli/src/main.rs:165` consumes an invocation that previously started the prompt `trace` through `tui/src/cli.rs:11`, including changed strict-config behavior at `cli/src/main.rs:2206`, without an explicit compatibility disposition or an automated offline/read-only PTY test.
+9. Focused CI now includes the parent renderer and Linux 100,000-node profile at `.github/workflows/ariadne-trace.yml:71-81`, but it omits `codex-rollout-trace`, the PTY test, and cross-platform containment evidence.
+10. The coverage ledger does not exist, and test-only construction helpers remain at `trace-tui/src/app.rs:45`, `:141`, and `trace-tui/src/browser.rs:122`. `trace/src/lib.rs:16` retains `pub use model::*`; production Rust and Python callables remain incompletely documented; and `.ariadne/demo/demo.py:4` retains the disallowed `from __future__ import annotations`.
+11. No production module exceeds 800 lines, but `trace/src/model.rs` has 761 lines, `trace/src/catalog.rs` 734, `trace-tui/src/render.rs` 739, `trace-tui/src/browser.rs` 732, and `trace-tui/src/app.rs` 579. Semantic presentation and document preparation around `trace/src/model.rs:305-319` are cohesive extraction candidates for the 500-line target.
+12. The fork changes 10,532 lines from `upstream/main`; the original browser commit changes 4,575 lines, and the single-panel commit changes 4,593. The four commits ahead of `origin/ariadne` change 6,112 lines, including a 2,458-line intermediate cache change that the single-panel commit substantially rewrites. Restack that churn and land independently reviewable stages: the roughly 414-line resilient-replay prerequisite, roughly 240-line `TraceIndex` foundation, roughly 440-line record-presentation foundation, semantic content and renderer contracts, background lifecycle, navigation and filtering, snapshots, and CLI wiring. Keep the existing 799-line reducer hardening split from unrelated containment and Unicode work.
 
 Treat tests as behavioral evidence, not as a requirement to create one shallow test per helper. The implementation must maintain a coverage ledger mapping each fork-owned production function and type to a unit, integration, snapshot, or structural test, or to a written exception for a trivial accessor or statically defined value. Repository guidance against tests of static values still applies.
 
@@ -70,14 +77,14 @@ If a required fix crosses one of these boundaries, stop that movement and open a
 
 ## Movements
 
-Each movement is a separate review unit. Complex logic changes should remain below 500 changed lines and every non-mechanical change below 800 changed lines. Split a movement further before implementation when its actual diff would exceed those limits. Preserve unrelated worktree changes.
+Each movement is a separate review unit. Complex logic changes should remain below 500 changed lines and every non-mechanical change below 800 changed lines. Restack or split the current commits before review so an intermediate cache implementation is not reviewed immediately before its replacement. Preserve unrelated worktree changes.
 
 ### Movement 0: Freeze Contracts And Decisions
 
 Dependencies: none.
 
 - Record the resource-limit contract for catalog records, projected nodes, event bytes, semantic payload bytes, display payload bytes, search results, indexed fields, and rendered windows. Define whether diagnostics count against each cap and ensure every admitted object has a deterministic place in the accounting.
-- Add regression tests that fail on the current pre-check insertion, rich-session orphaning, duplicate overwrite, manifest-path mismatch, unbounded semantic payload read, synchronous search, and full-catalog picker preparation. Prefer structural counters or injected bounded readers over fragile wall-clock thresholds.
+- Add regression tests that fail on the current pre-check insertion, rich-session orphaning, duplicate overwrite, manifest-path mismatch, unbounded semantic payload read, search-limit boundaries, and full-catalog picker preparation. Prefer structural counters or injected bounded readers over fragile wall-clock thresholds.
 - Build a coverage ledger for production functions, methods, and types in the owned paths. Record the covering test and invariant, not merely a test filename. Mark trivial accessors and static definitions as intentionally exempt instead of adding boilerplate tests.
 - Make an explicit product decision for the top-level `codex trace` token: either accept and document that it no longer begins an interactive prompt, or preserve prompt compatibility and reserve the feature for a non-conflicting surface such as the future `/trace` command. Add the corresponding CLI test. Do not infer the decision from the current parser shape.
 - Correct public claims immediately if they currently imply that all payloads are lazy. Distinguish bounded semantic replay reads from on-demand raw display reads.
@@ -135,14 +142,14 @@ Required tests:
 
 Dependencies: Movement 0 structural performance tests and Movement 1 stable model identity.
 
-Implement picker and search work as separate changes.
+The asynchronous, generation-tagged search foundation is implemented. Land picker preparation, search boundary evidence, and lifecycle hardening as separate changes.
 
 - Cache or incrementally index picker labels and match data. Rendering a picker frame may inspect only the visible window plus a fixed amount of state; it must not format every catalog item.
-- Move search preparation and execution out of the input/event loop. Tag jobs with model and query generations, ignore stale results, and make replacement, cancellation, and shutdown explicit.
+- Retain search preparation and execution outside the input/event loop. Complete replacement, cancellation, worker-failure, cross-session delivery, and shutdown handling without regressing generation checks.
 - Preserve the last stable view while work is pending. Surface bounded progress or failure state without blocking navigation.
 - Keep the 1,000-hit result cap, 4,096 indexed-field cap, and 16,384-character searchable field cap explicit and testable. Define Unicode normalization and case-folding behavior without slicing invalid UTF-8 boundaries.
-- Extract inspector state and behavior from `trace-tui/src/browser.rs` into a sibling module with a sibling test file. Extract picker or search-job ownership as well when needed to bring production modules toward the 500-line target and below the roughly 800-line hard-review threshold.
-- Preserve stable selection and hidden-hit reveal behavior when expansion, collapse, model replacement, or asynchronous results change visible rows.
+- Extract semantic presentation and document preparation from `trace/src/model.rs`. Extract picker, detail, or job ownership into sibling modules when their invariants can remain cohesive and the change brings production modules toward the 500-line target.
+- Preserve stable selection, viewport, and hidden-hit reveal behavior across descent, return, model replacement, filtering, and asynchronous results.
 
 Required lifecycle tests:
 
@@ -157,8 +164,9 @@ Required lifecycle tests:
 Dependencies: Movements 1 through 3 APIs stable.
 
 - Add rich-projection tests for turns, messages, inference items, tool calls and results, code execution, compactions, terminal states, diagnostics, and delegation edges.
-- Test nested expansion and collapse, multiple roots, child-pane navigation, first/last movement, hidden-search-hit reveal, empty traces, cycles, malformed records, and diagnostics.
-- Add trace-TUI snapshots for Unicode and terminal controls, successful, failed, and interrupted rich traces, compaction and terminal nodes, delegation edges, truncated structured details, payload notices, and narrow and wide terminals.
+- Test single-level descent and return with exact selection and viewport restoration; paging, half-page movement, `gg` and `G`; multiple roots; hidden-search-hit reveal; empty traces; cycles; malformed records; and diagnostics.
+- Add trace-TUI snapshots for Text mode, successful exact Raw mode, Unicode and terminal controls, successful, failed, and interrupted rich traces, compaction and terminal nodes, delegation edges, truncated structured details, payload notices, and narrow and wide terminals.
+- Extend parent-renderer tests across Markdown, JSON, code, text wrapping, failure and conflict evidence, and non-color distinctions for every semantic family.
 - Strengthen merged-input assertions to compare complete expected structures rather than selected fields.
 - Add a real pseudo-terminal integration test that invokes the supported CLI command on deterministic synthetic fixtures, navigates the browser, exits, and proves the fixture bytes did not change. Run it with network access and credential access unavailable.
 - Keep test functions in descriptive sibling `*_tests.rs` modules when adding new modules. Move the newly added inline search tests to that layout.
@@ -194,7 +202,7 @@ Exit evidence:
 Dependencies: Movements 1 through 5.
 
 - Add `codex-rollout-trace` to the focused Linux, macOS, and Windows workflow.
-- Invoke the 100,000-node profile in a dedicated, non-routine job or add a deterministic structural large-trace test to routine CI and retain timing in a dedicated performance job. An ignored test that no configured job invokes is not acceptance evidence.
+- Retain the invoked Linux 100,000-node profile and add deterministic structural assertions for picker and viewport work. Timing remains diagnostic evidence rather than the only correctness gate.
 - Run the CLI compatibility tests and pseudo-terminal offline/read-only test on every supported platform where terminal facilities permit it; record an explicit platform-specific substitute when they do not.
 - Verify bundle containment and path behavior on Linux, macOS, and Windows.
 - Preserve exact commands, toolchain, host metadata, synthetic fixture fingerprints, and the candidate commit for all performance and release evidence.
@@ -277,4 +285,4 @@ The closeout must also update the residual gates in `.ariadne/plans/open/2026-07
 
 ## Successor UI coordination
 
-The accepted `.ariadne/plans/open/2026-07-28-single-panel-trace-browser.md` owns the replacement of panes, flattened-tree expansion, inspector layout, presentation snapshots, and expansion-specific performance evidence. This plan retains authority over source correctness, evidence preservation, bounds, containment, asynchronous lifecycle, picker/search responsiveness, test depth, documentation coverage, and focused CI. Interpret Movement 3's expansion/collapse references as single-level descent/return and current-level viewport requirements; do not preserve obsolete folding behavior merely to satisfy historical wording.
+The [closed single-panel plan](../closed/2026-07-28-single-panel-trace-browser.md) records completion of the pane, fold, presentation, and single-depth redesign. This plan retains authority over source correctness, evidence preservation, bounds, containment, asynchronous lifecycle, picker and search responsiveness, test depth, documentation coverage, compatibility, reviewable staging, and focused CI. All navigation requirements now mean single-level descent and return with current-level viewport restoration; obsolete folding and child-pane behavior must not be reintroduced.

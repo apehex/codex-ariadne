@@ -10,24 +10,25 @@ use codex_trace::TraceSourceKind;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyEventKind;
-use crossterm::event::KeyModifiers;
 
 #[cfg(test)]
 use crate::PlainTraceVisualRenderer;
 use crate::TraceViewOptions;
 use crate::TraceVisualRenderer;
 use crate::browser::BrowserState;
-use crate::browser::SearchScope;
+use crate::input::handle_browser_key;
 use crate::jobs::DetailRenderJob;
 use crate::jobs::DetailRenderResult;
 use crate::jobs::SearchJob;
 use crate::jobs::SearchResult;
+use crate::picker::PickerState;
 
 pub(crate) struct App {
     pub(crate) screen: Screen,
     pub(crate) catalog: Option<TraceCatalog>,
     preferred_session: Option<String>,
     auto_open_rich: bool,
+    pending_session: Option<String>,
     pub(crate) notice: Option<String>,
     options: TraceViewOptions,
     renderer: Arc<dyn TraceVisualRenderer>,
@@ -41,12 +42,6 @@ pub(crate) enum Screen {
     Error(String),
 }
 
-#[derive(Debug, Default)]
-pub(crate) struct PickerState {
-    pub(crate) selected: usize,
-    pub(crate) search: Option<String>,
-}
-
 #[derive(Debug)]
 pub(crate) enum AppAction {
     None,
@@ -54,6 +49,7 @@ pub(crate) enum AppAction {
     CancelJob,
     LoadSession(String),
     ReadPayload {
+        session_id: String,
         id: String,
         handle: RawPayloadHandle,
         limit: PayloadReadLimit,
@@ -82,6 +78,7 @@ impl App {
             catalog: None,
             preferred_session,
             auto_open_rich,
+            pending_session: None,
             notice: None,
             options,
             renderer,
@@ -121,15 +118,20 @@ impl App {
         });
         self.catalog = Some(catalog);
         if let Some(id) = valid_id {
+            self.pending_session = Some(id.clone());
             self.screen = Screen::Loading(format!("loading session {id}"));
             AppAction::LoadSession(id)
         } else {
-            self.screen = Screen::Picker(PickerState::default());
+            self.screen = Screen::Picker(PickerState::new(self.catalog.as_ref()));
             AppAction::None
         }
     }
 
-    pub(crate) fn install_browser(&mut self, browser: BrowserState) {
+    pub(crate) fn install_browser(&mut self, session_id: &str, browser: BrowserState) {
+        if self.pending_session.as_deref() != Some(session_id) {
+            return;
+        }
+        self.pending_session = None;
         self.notice = None;
         self.screen = Screen::Browser(Box::new(browser));
     }
@@ -140,16 +142,22 @@ impl App {
 
     #[cfg(test)]
     pub(crate) fn install_session(&mut self, trace: SessionTrace) {
-        self.install_browser(BrowserState::with_visuals(
-            trace,
-            self.options.clone(),
-            Arc::clone(&self.renderer),
-        ));
+        let session_id = trace.summary.session_id.clone();
+        self.pending_session = Some(session_id.clone());
+        self.install_browser(
+            &session_id,
+            BrowserState::with_visuals(trace, self.options.clone(), Arc::clone(&self.renderer)),
+        );
     }
 
-    pub(crate) fn install_payload(&mut self, id: String, result: anyhow::Result<SanitizedPayload>) {
+    pub(crate) fn install_payload(
+        &mut self,
+        session_id: &str,
+        id: String,
+        result: anyhow::Result<SanitizedPayload>,
+    ) {
         if let Screen::Browser(browser) = &mut self.screen {
-            browser.install_payload(id, result);
+            browser.install_payload(session_id, id, result);
         }
     }
 
@@ -180,18 +188,20 @@ impl App {
     }
 
     pub(crate) fn install_error(&mut self, error: String) {
+        self.pending_session = None;
         if self.catalog.is_some() {
             self.notice = Some(error);
-            self.screen = Screen::Picker(PickerState::default());
+            self.screen = Screen::Picker(PickerState::new(self.catalog.as_ref()));
         } else {
             self.screen = Screen::Error(error);
         }
     }
 
     pub(crate) fn cancel_loading(&mut self) {
+        self.pending_session = None;
         if self.catalog.is_some() {
             self.notice = Some("loading cancelled".to_string());
-            self.screen = Screen::Picker(PickerState::default());
+            self.screen = Screen::Picker(PickerState::new(self.catalog.as_ref()));
         }
     }
 
@@ -213,21 +223,16 @@ impl App {
                 _ => AppAction::None,
             },
             Screen::Picker(picker) => {
-                let matches = picker_matches(self.catalog.as_ref(), picker.search.as_deref());
-                let session_count = matches.len();
+                let session_count = picker.match_count();
                 if picker.search.is_some() {
                     match key.code {
                         KeyCode::Esc => {
-                            picker.search = None;
-                            picker.selected = 0;
+                            picker.cancel_search();
                             return AppAction::None;
                         }
                         KeyCode::Enter => {}
                         KeyCode::Backspace => {
-                            if let Some(search) = &mut picker.search {
-                                search.pop();
-                            }
-                            picker.selected = 0;
+                            picker.pop_search();
                             return AppAction::None;
                         }
                         KeyCode::Down => {
@@ -242,10 +247,7 @@ impl App {
                             return AppAction::None;
                         }
                         KeyCode::Char(ch) => {
-                            if let Some(search) = &mut picker.search {
-                                search.push(ch);
-                            }
-                            picker.selected = 0;
+                            picker.push_search(ch);
                             return AppAction::None;
                         }
                         _ => return AppAction::None,
@@ -273,20 +275,20 @@ impl App {
                         AppAction::None
                     }
                     KeyCode::Char('/') => {
-                        picker.search = Some(String::new());
-                        picker.selected = 0;
+                        picker.begin_search();
                         AppAction::None
                     }
                     KeyCode::Enter => {
-                        let id = matches
-                            .get(picker.selected)
+                        let id = picker
+                            .selected_catalog_index()
                             .and_then(|index| {
                                 self.catalog
                                     .as_ref()
-                                    .and_then(|catalog| catalog.sessions.get(*index))
+                                    .and_then(|catalog| catalog.sessions.get(index))
                             })
                             .map(|session| session.session_id.clone());
                         if let Some(id) = id {
+                            self.pending_session = Some(id.clone());
                             self.screen = Screen::Loading(format!("loading session {id}"));
                             AppAction::LoadSession(id)
                         } else {
@@ -299,7 +301,7 @@ impl App {
             Screen::Browser(browser) => {
                 let (action, return_to_picker) = handle_browser_key(browser, key);
                 if return_to_picker {
-                    self.screen = Screen::Picker(PickerState::default());
+                    self.screen = Screen::Picker(PickerState::new(self.catalog.as_ref()));
                 }
                 action
             }
@@ -309,271 +311,4 @@ impl App {
             },
         }
     }
-}
-
-fn handle_browser_key(browser: &mut BrowserState, key: KeyEvent) -> (AppAction, bool) {
-    if browser.help_open {
-        let action = match key.code {
-            KeyCode::Char('q') => AppAction::Quit,
-            KeyCode::Esc | KeyCode::Char('?') | KeyCode::Enter => {
-                browser.help_open = false;
-                AppAction::None
-            }
-            _ => AppAction::None,
-        };
-        return (action, false);
-    }
-    if browser.search.is_some() {
-        let action = match key.code {
-            KeyCode::Esc => {
-                browser.cancel_search();
-                AppAction::None
-            }
-            KeyCode::Enter => {
-                browser.accept_search();
-                AppAction::None
-            }
-            KeyCode::Backspace => {
-                browser.search_pop();
-                AppAction::None
-            }
-            KeyCode::Down => {
-                browser.move_search(/*delta*/ 1);
-                AppAction::None
-            }
-            KeyCode::Up => {
-                browser.move_search(/*delta*/ -1);
-                AppAction::None
-            }
-            KeyCode::Char(ch) => {
-                browser.search_push(ch);
-                AppAction::None
-            }
-            _ => AppAction::None,
-        };
-        return (action, false);
-    }
-    if browser.filter_open {
-        let action = match key.code {
-            KeyCode::Esc => {
-                browser.filter_open = false;
-                AppAction::None
-            }
-            KeyCode::Enter => {
-                browser.apply_filter();
-                AppAction::None
-            }
-            KeyCode::Char(' ') => {
-                browser.toggle_filter_class();
-                AppAction::None
-            }
-            KeyCode::Char('r') => {
-                browser.reset_filter();
-                AppAction::None
-            }
-            KeyCode::Down | KeyCode::Char('j') => {
-                browser.move_filter(/*delta*/ 1);
-                AppAction::None
-            }
-            KeyCode::Up | KeyCode::Char('k') => {
-                browser.move_filter(/*delta*/ -1);
-                AppAction::None
-            }
-            KeyCode::Char('q') => AppAction::Quit,
-            _ => AppAction::None,
-        };
-        return (action, false);
-    }
-    if browser.detail_open {
-        let action = match key.code {
-            KeyCode::Char('q') => AppAction::Quit,
-            KeyCode::Esc | KeyCode::Backspace => {
-                browser.back();
-                AppAction::None
-            }
-            KeyCode::Down | KeyCode::Char('j') => {
-                browser.scroll_detail(/*delta*/ 1);
-                AppAction::None
-            }
-            KeyCode::Up | KeyCode::Char('k') => {
-                browser.scroll_detail(/*delta*/ -1);
-                AppAction::None
-            }
-            KeyCode::PageDown => {
-                browser
-                    .scroll_detail(isize::try_from(browser.detail_page_size).unwrap_or(isize::MAX));
-                AppAction::None
-            }
-            KeyCode::PageUp => {
-                browser.scroll_detail(
-                    -isize::try_from(browser.detail_page_size).unwrap_or(isize::MAX),
-                );
-                AppAction::None
-            }
-            KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                browser.scroll_detail(
-                    isize::try_from(browser.detail_page_size.div_ceil(2)).unwrap_or(isize::MAX),
-                );
-                AppAction::None
-            }
-            KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                browser.scroll_detail(
-                    -isize::try_from(browser.detail_page_size.div_ceil(2)).unwrap_or(isize::MAX),
-                );
-                AppAction::None
-            }
-            KeyCode::Char('v') => {
-                browser.cycle_content_mode();
-                if browser.selected_is_raw_payload()
-                    && browser.content_mode == crate::ContentMode::Raw
-                {
-                    return (read_selected_payload(browser), false);
-                }
-                AppAction::None
-            }
-            KeyCode::Char('r') => read_selected_payload(browser),
-            KeyCode::Char('?') => {
-                browser.help_open = true;
-                AppAction::None
-            }
-            _ => AppAction::None,
-        };
-        return (action, false);
-    }
-
-    if browser.pending_g {
-        browser.pending_g = false;
-        let action = match key.code {
-            KeyCode::Char('g') => {
-                browser.first();
-                AppAction::None
-            }
-            KeyCode::Char('/') => {
-                browser.begin_search(SearchScope::All);
-                AppAction::None
-            }
-            _ => AppAction::None,
-        };
-        return (action, false);
-    }
-
-    let action = match key.code {
-        KeyCode::Char('q') => AppAction::Quit,
-        KeyCode::Esc | KeyCode::Backspace => {
-            if !browser.back() {
-                return (AppAction::None, true);
-            }
-            AppAction::None
-        }
-        KeyCode::Char('/') => {
-            browser.begin_search(SearchScope::Visible);
-            AppAction::None
-        }
-        KeyCode::Char('f') => {
-            browser.filter_open = true;
-            AppAction::None
-        }
-        KeyCode::Char('F') => {
-            browser.reset_filter();
-            AppAction::None
-        }
-        KeyCode::Char('?') => {
-            browser.help_open = true;
-            AppAction::None
-        }
-        KeyCode::Down | KeyCode::Char('j') => {
-            browser.move_vertical(/*delta*/ 1);
-            AppAction::None
-        }
-        KeyCode::Up | KeyCode::Char('k') => {
-            browser.move_vertical(/*delta*/ -1);
-            AppAction::None
-        }
-        KeyCode::PageDown => {
-            browser.page(/*delta*/ 1, browser.page_size);
-            AppAction::None
-        }
-        KeyCode::PageUp => {
-            browser.page(/*delta*/ -1, browser.page_size);
-            AppAction::None
-        }
-        KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            browser.page(/*delta*/ 1, browser.page_size.div_ceil(2));
-            AppAction::None
-        }
-        KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            browser.page(/*delta*/ -1, browser.page_size.div_ceil(2));
-            AppAction::None
-        }
-        KeyCode::Home => {
-            browser.first();
-            AppAction::None
-        }
-        KeyCode::End | KeyCode::Char('G') => {
-            browser.last();
-            AppAction::None
-        }
-        KeyCode::Char('g') => {
-            browser.pending_g = true;
-            AppAction::None
-        }
-        KeyCode::Enter => {
-            browser.enter_selected();
-            if browser.detail_open && browser.selected_is_raw_payload() {
-                return (read_selected_payload(browser), false);
-            }
-            AppAction::None
-        }
-        KeyCode::Char('i') => {
-            browser.open_detail();
-            AppAction::None
-        }
-        KeyCode::Char('n') => {
-            browser.jump_search(/*delta*/ 1);
-            AppAction::None
-        }
-        KeyCode::Char('N') => {
-            browser.jump_search(/*delta*/ -1);
-            AppAction::None
-        }
-        KeyCode::Char('r') => read_selected_payload(browser),
-        _ => AppAction::None,
-    };
-    (action, false)
-}
-
-fn read_selected_payload(browser: &mut BrowserState) -> AppAction {
-    browser
-        .selected_payload_request()
-        .map_or(AppAction::None, |(id, handle)| AppAction::ReadPayload {
-            id,
-            handle,
-            limit: PayloadReadLimit::DEFAULT,
-        })
-}
-
-pub(crate) fn picker_matches(catalog: Option<&TraceCatalog>, query: Option<&str>) -> Vec<usize> {
-    let needle = query.unwrap_or_default().trim().to_lowercase();
-    catalog.map_or_else(Vec::new, |catalog| {
-        catalog
-            .sessions
-            .iter()
-            .enumerate()
-            .filter(|(_, session)| {
-                needle.is_empty()
-                    || format!(
-                        "{} {} {}",
-                        session.session_id,
-                        session
-                            .cwd
-                            .as_ref()
-                            .map_or_else(String::new, |path| path.display().to_string()),
-                        session.model_provider.as_deref().unwrap_or_default()
-                    )
-                    .to_lowercase()
-                    .contains(&needle)
-            })
-            .map(|(index, _)| index)
-            .collect()
-    })
 }
