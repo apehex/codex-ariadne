@@ -29,23 +29,26 @@ Status: implementation evidence; cross-platform workflow results pending
 | `rollout-trace/reducer/inspection.rs` public metadata and replay types/functions | Manifest-selected event log, bounded records, invalid-record recovery, event limit, diagnostics | `inspection_tests.rs` custom-path, malformed, invalid UTF-8, oversized-followed-by-valid, and event-limit tests |
 | `rollout-trace/reducer/conversation.rs`, `compaction.rs`, and `tool/agents.rs` | First-observation raw sequence survives reduction for conversation items, compactions, and interaction edges | sequence assertions in `conversation_tests.rs` and `tool/agents_tests.rs` |
 | `rollout-trace/reducer/semantic_payload.rs` | Zero, exact, plus-one, invalid UTF-8, absolute, lexical, and symlink behavior | `semantic_payload_tests.rs` |
-| `trace/catalog.rs` repository builders, discovery, summaries, selection, and diagnostics | Upstream `session_id` grouping, ordinary/rich merging, lazy discovery, malformed input, roots, cycles, lineage metadata, conflicts, and selected-session bounds | `trace_tests.rs` |
+| `trace/catalog.rs` repository builders, discovery, summaries, selection, accumulation, and diagnostics | Upstream `session_id` grouping, ordinary/rich merging, lazy discovery, malformed input, roots, cycles, lineage metadata, conflicts, deterministic accumulation, and selected-session bounds | `trace_tests.rs` |
 | `trace/graph.rs` admission types and methods | Zero, exact, plus-one, missing parent, duplicate preservation, conflicting evidence, repeated-parent remapping, and cross-kind causal sibling order | `graph_tests.rs` |
-| `trace/ordinary.rs` bounded reader and projection | Same-session containment, cross-session/missing/cyclic parent fallback, numeric ordinal ordering under regressing timestamps, and bounded-line behavior | `ordinary_tests.rs` and `trace_tests.rs` |
-| `trace/rich.rs` rich projection helpers | Parent validation, raw-event causal ordering across semantic families, semantic evidence downgrade, raw payload handles, and merged integration | `rich_tests.rs` and rich cases in `trace_tests.rs`; broader semantic-family depth remains pending |
+| `trace/ordinary.rs` bounded reader, precomputed topology, and projection | Same-session containment, ambiguous duplicate parents, cross-session/missing/cyclic parent fallback, numeric ordinal ordering under regressing timestamps, and bounded-line behavior | `ordinary_tests.rs` and `trace_tests.rs` |
+| `trace/rich.rs` rich projector and node specifications | Parent validation, reusable node assembly, raw-event causal ordering across semantic families, semantic evidence downgrade, raw payload handles, and merged integration | `rich_tests.rs` and rich cases in `trace_tests.rs`; broader semantic-family depth remains pending |
 | `trace/presentation.rs` presentation constructor, classifiers, decoders, sanitizers, and bounded documents | Role/channel/class selection, interpreted newlines, terminal controls, and UTF-8 bounds | `presentation_tests.rs` |
 | `trace/index.rs` index type and lookup/traversal methods | Stable ordering, locator lookup, roots, children, compact positions, and rebuild behavior | `index_tests.rs` |
 | `trace/search.rs` search functions and match type | Attribution, hit/field/character exact limits, UTF-8, JSON pointers, controls, ASCII case behavior, and empty queries | `search_tests.rs` |
 | `trace/payload.rs` limit, result, reader, and path sanitizer | Exact whole-object result, containment, regular-file rejection, controls, and display cap | payload case in `trace_tests.rs` |
 | `trace/model.rs` public data types and trivial accessors | Deep equality throughout the owning module tests; constructors and read-only accessors are intentionally exempt from isolated tests when the integration tests exercise them | all `trace/src/*_tests.rs` |
-| `trace-tui/picker.rs` picker state and query methods | Cached match replacement and restoration | `picker_tests.rs`; visible-window snapshots cover rendering |
+| `trace-tui/picker.rs` picker state, semantic key actions, and query methods | Cached match replacement, bounded selection, editing actions, and restoration | `picker_tests.rs`; visible-window snapshots cover rendering |
 | `trace-tui/app.rs` screens, actions, catalog/session installation, cancellation, and worker-result gates | preferred and exact source selection, error fallback, stale session identity, and payload identity through interaction tests | `render_tests.rs`; explicit worker-panic and pseudo-terminal coverage remain pending |
 | `trace-tui/input.rs` key dispatch | Single-depth entry/return, paging, search, filters, help, content modes, and payload request | state transitions and snapshots in `render_tests.rs` |
-| `trace-tui/browser.rs` navigation state | selection and viewport restoration, indexed windows, cycles, filtering, and 100,000-node profile | `render_tests.rs` |
+| `trace-tui/browser.rs` navigation state | reusable bounded selection, viewport restoration, indexed windows, cycles, filtering, and 100,000-node profile | `selection_tests.rs` and `render_tests.rs` |
 | `trace-tui/browser/detail.rs` detail and payload controller | stale mode/width key rejection, lazy read, truncation, failure sanitization, and cross-session payload rejection | `render_tests.rs` |
 | `trace-tui/browser/search.rs` search/filter controller | query generations, stale rejection, visible/all scope, and hidden-hit reveal | `render_tests.rs` |
-| `trace-tui/jobs.rs` background detail and search jobs | semantic modes, bounded detail, generation result installation, and search attribution | controller tests and snapshots in `render_tests.rs` |
-| `trace-tui/render.rs` record table and shared formatting helpers | narrow, medium, wide, header, column, preview, control, and viewport behavior | `render_tests.rs` and reviewed snapshots |
+| `trace-tui/jobs.rs` and `request.rs` background jobs and request lifecycle | semantic modes, bounded detail, browser epochs, latest-key generations, invalidation, result installation, and search attribution | `request_tests.rs`, controller tests, and snapshots in `render_tests.rs` |
+| `trace-tui/render.rs` overview orchestration | narrow, medium, wide, header, preview, semantic row style, and viewport behavior | `render_tests.rs` and reviewed snapshots |
+| `trace-tui/render/table.rs` column plan and row assembly | configured column values, widths, omission priorities, shared header/row layout, and forced single-line output | `table_tests.rs`, `render_tests.rs`, and reviewed snapshots |
+| `trace-tui/render/text.rs` terminal-safe text primitives | distinct single-line and multiline control policy, Unicode display-width fitting, ellipsis, and padding | `text_tests.rs` and `single_line_overview_controls.snap` |
+| `trace-tui/selection.rs` bounded list selection | empty and shortened collections, signed clamped movement, cyclic movement, first, and last | `selection_tests.rs` |
 | `trace-tui/render/picker.rs` windowed picker rows | root and filtered picker snapshots; structural visible-window assertion remains pending | `render_tests.rs` |
 | `trace-tui/render/overlay.rs` detail, search, filter, and help surfaces | corresponding deterministic snapshots | `render_tests.rs` |
 | `trace-tui/view.rs` options and visual-renderer contract | option-controlled columns, headers, previews, and injected renderer behavior | `render_tests.rs` and parent TUI renderer tests |
@@ -62,8 +65,8 @@ Status: implementation evidence; cross-platform workflow results pending
 ## Local validation
 
 - `just test -p codex-rollout-trace`: 74 passed.
-- `just test -p codex-trace`: 35 passed.
-- `just test -p codex-trace-tui`: 12 passed and one profile test skipped by default.
+- `just test -p codex-trace`: 38 passed.
+- `just test -p codex-trace-tui`: 24 passed and one profile test skipped by default.
 - `just test -p codex-trace-tui profile_hundred_thousand_node_navigation -- --ignored --nocapture`: passed with 100,000 nodes, 211.280 ms index construction, 1.792 ms first entry, 0.000 ms warm navigation p95, 1.820 ms warm level-entry p95, and 0.012 ms warm return p95.
 - The focused `codex-cli` parser tests passed, including the compatibility assertion that `codex -- trace` remains the literal interactive prompt while `codex trace` selects the browser command.
 - `cargo insta pending-snapshots --manifest-path trace-tui/Cargo.toml` reported no pending snapshots.

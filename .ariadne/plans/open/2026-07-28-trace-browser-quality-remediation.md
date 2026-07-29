@@ -34,6 +34,10 @@ The current local baseline is:
 
 The post-single-panel audit resolved the obsolete fold/pane architecture, synchronous search, stale search/detail installation, missing parent renderer, ignored performance-profile workflow, and over-800-line browser findings. It found no model-visible context mutation, app-server or raw-response API change, configuration-schema change, rich-bundle schema change, or rollout-resume regression.
 
+The 2026-07-29 internal factorization added a precomputed ordinary-session topology, centralized catalog accumulation, rich projection assembly, browser-scoped request epochs, reusable latest-request and bounded-selection primitives, a data-driven overview column plan, and distinct terminal-safe single-line and multiline text policies. The focused suites now pass 38 `codex-trace` tests and 24 `codex-trace-tui` tests, with one ignored deterministic performance profile. These changes reduce repeated interpretation and duplicated state arithmetic without changing persisted formats or upstream-owned Codex modules.
+
+The proposed borderless, horizontally scrollable overview is intentionally deferred to [its own open plan](2026-07-29-borderless-horizontal-trace-overview.md). This quality plan supplies its bounds, lifecycle, documentation, snapshot, and compatibility gates but does not treat that visual redesign as remediation already completed.
+
 Existing evidence worth preserving includes focused `TraceIndex` ordering and rebuild tests; ordinary tree, orphan, cycle, malformed-rich, root-conflict, lazy-discovery, and basic payload-containment coverage; semantic rendering, UTF-8 truncation, and terminal-control tests; and baseline single-panel snapshots and state tests for descent, filtering, search scopes, hidden-hit reveal, stale-result rejection, help, and lazy payload failure.
 
 Passing this baseline does not cover the remaining invariants:
@@ -286,3 +290,5 @@ The closeout must also update the residual gates in `.ariadne/plans/open/2026-07
 ## Successor UI coordination
 
 The [closed single-panel plan](../closed/2026-07-28-single-panel-trace-browser.md) records completion of the pane, fold, presentation, and single-depth redesign. This plan retains authority over source correctness, evidence preservation, bounds, containment, asynchronous lifecycle, picker and search responsiveness, test depth, documentation coverage, compatibility, reviewable staging, and focused CI. All navigation requirements now mean single-level descent and return with current-level viewport restoration; obsolete folding and child-pane behavior must not be reintroduced.
+
+The [borderless horizontal overview plan](2026-07-29-borderless-horizontal-trace-overview.md) owns the later removal of the overview border, a shared horizontal viewport, progressively appended bounded content, footer mode placement, and horizontal shortcuts. Its implementation must build on the factored column, text, selection, and request primitives instead of restoring row wrapping or coupling horizontal state to trace topology.

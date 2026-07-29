@@ -18,7 +18,7 @@ catalog loading → root picker → selected-session loading → browser
 
 The picker owns precomputed normalized labels, cached query matches, selection, and query state over catalog summaries. The browser navigation controller owns a current container and locator-based return stack; sibling detail and search controllers own their caches, generations, visibility, and lazily installed payload content.
 
-Background session and payload results carry their root-session identity, while search and detail results carry generations and complete view keys. Results replace state only when those identities remain current. Cancellation or failure returns to the previous stable screen and exposes an error without installing a partial session.
+Every browser instance receives a unique epoch. Background session and payload results carry their root-session identity, while search, detail, and payload work is admitted through latest-request state containing the browser epoch, request generation, and complete view key. Results replace state only when all three remain current, including when the same session is reloaded into a replacement browser. Cancellation, invalidation, or failure returns to the previous stable screen and exposes an error without installing a partial session.
 
 ## Event loop
 
@@ -36,7 +36,11 @@ The browser always renders one full-width surface: either the current container'
 
 Listing rows contain an elastic name, caller-selected aligned metadata values without labels, optional headers, and an opportunistic bounded preview. Lower-priority columns and previews disappear as width contracts; navigation and record availability do not change with width.
 
+One data-driven column plan owns metadata headers, widths, omission priorities, value extraction, and row assembly. Overview labels, metadata, previews, picker rows, search snippets, and identifiers use a terminal-safe single-line policy; intentional line breaks are preserved only by the separate multiline policy used for detail and message content. All list controllers share one bounded-selection primitive rather than duplicating index arithmetic.
+
 Every row passes through the injected `TraceVisualRenderer`. The parent Codex TUI adapter reuses its terminal palette, message backgrounds, Markdown renderer, and syntax highlighter, while the standalone fallback remains deterministic and plain. Role and type remain visible in text so color is never the sole distinction.
+
+The later removal of the overview border, shared horizontal scrolling, progressively appended bounded content, and footer mode placement are specified in [the open borderless overview plan](../../.ariadne/plans/open/2026-07-29-borderless-horizontal-trace-overview.md). They are not part of the current rendering contract until that plan's interaction and configuration decisions are resolved.
 
 ## Navigation
 

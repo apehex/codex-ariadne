@@ -26,6 +26,8 @@ Each node also retains a bounded presentation descriptor derived during projecti
 
 Containment, lineage, and causality are distinct. For ordinary rollouts, upstream `SessionMeta.session_id` defines the catalog session, `SessionMeta.id` identifies one thread, and `parent_thread_id` is the only ordinary containment edge. `forked_from_id` and `history_base` remain inspectable lineage metadata and do not merge otherwise independent sessions. Rich containment follows `AgentOrigin`. Interaction edges answer how information moved. Broken or cross-session parents remain observable, affected threads stay reachable from their recorded session, and cycles are cut with a diagnostic.
 
+Ordinary parent observations are normalized into one session-scoped topology before any thread is projected. Parent lookup, cross-session detection, cycle checks, and diagnostics therefore share one interpretation instead of repeatedly rescanning discovered files. Conflicting parent observations for the same thread are treated as ambiguous evidence and fall back to the recorded session rather than choosing whichever file was visited last.
+
 Siblings use typed source positions: structural thread containers use recorded start time, ordinary records use numeric rollout ordinals, and rich semantic nodes use their first raw event sequence. Timestamped containers precede the causal event stream when both share a parent, rather than comparing incompatible timestamp and sequence units. Unpositioned diagnostics and raw artifacts follow positioned siblings in stable admission order. Display timestamps are never used to reorder records within a thread, so delayed or regressing wall-clock observations remain in causal order. Locators survive filtering and sorting within a source version but are not a persisted compatibility promise across upstream schema migrations.
 
 ## Projection and reconciliation
@@ -33,6 +35,8 @@ Siblings use typed source positions: structural thread containers use recorded s
 Ordinary projection uses `codex-rollout` and protocol records. It provides durable transcript and lifecycle semantics but does not claim exact generation context or decrypted collaboration content when those values were not persisted.
 
 Rich projection uses the `codex-rollout-trace` manifest, ordered event spine, reducer, runtime objects, interaction edges, and payload references. Reducer output remains governed by that crate; `codex-trace` adapts it rather than copying the rich schema.
+
+Rich node construction is routed through one projector and declarative node specifications. The projector owns parent validation, typed positions, presentation derivation, and graph admission; semantic branches own only extraction of their source values. Catalog discovery likewise accumulates ordinary and rich observations through one deterministic accumulator before producing public summaries.
 
 Reconciliation is additive:
 
