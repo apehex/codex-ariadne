@@ -8,6 +8,7 @@ mod input;
 mod jobs;
 mod picker;
 mod render;
+mod request;
 mod view;
 
 pub use codex_trace::EvidenceGrade;
@@ -163,9 +164,13 @@ async fn run_event_loop(
 fn apply_worker_result(app: &mut App, result: WorkerResult) -> AppAction {
     match result {
         WorkerResult::Catalog(catalog) => app.install_catalog(catalog),
-        WorkerResult::Session { session_id, result } => match *result {
+        WorkerResult::Session {
+            session_id,
+            browser_epoch,
+            result,
+        } => match *result {
             Ok(browser) => {
-                app.install_browser(&session_id, browser);
+                app.install_browser(&session_id, browser_epoch, browser);
                 AppAction::None
             }
             Err(error) => {
@@ -174,11 +179,11 @@ fn apply_worker_result(app: &mut App, result: WorkerResult) -> AppAction {
             }
         },
         WorkerResult::Payload {
-            session_id,
+            browser_epoch,
             id,
             result,
         } => {
-            app.install_payload(&session_id, id, result);
+            app.install_payload(browser_epoch, id, result);
             AppAction::None
         }
         WorkerResult::Detail(result) => {
@@ -211,7 +216,10 @@ fn dispatch_action(
             }
             false
         }
-        AppAction::LoadSession(id) => {
+        AppAction::LoadSession {
+            session_id,
+            browser_epoch,
+        } => {
             let Some(catalog) = app.catalog.clone() else {
                 app.install_error("trace catalog is unavailable".to_string());
                 return false;
@@ -219,26 +227,24 @@ fn dispatch_action(
             let (options, renderer) = app.browser_visuals();
             jobs.push(tokio::spawn(async move {
                 WorkerResult::Session {
-                    session_id: id.clone(),
-                    result: Box::new(
-                        catalog
-                            .load_session(&id)
-                            .await
-                            .map(|trace| BrowserState::with_visuals(trace, options, renderer)),
-                    ),
+                    session_id: session_id.clone(),
+                    browser_epoch,
+                    result: Box::new(catalog.load_session(&session_id).await.map(|trace| {
+                        BrowserState::with_visuals(trace, options, renderer, browser_epoch)
+                    })),
                 }
             }));
             false
         }
         AppAction::ReadPayload {
-            session_id,
+            browser_epoch,
             id,
             handle,
             limit,
         } => {
             jobs.push(tokio::spawn(async move {
                 WorkerResult::Payload {
-                    session_id,
+                    browser_epoch,
                     id,
                     result: handle.read(limit).await,
                 }
@@ -297,10 +303,11 @@ enum WorkerResult {
     Catalog(TraceCatalog),
     Session {
         session_id: String,
+        browser_epoch: crate::request::BrowserEpoch,
         result: Box<Result<BrowserState>>,
     },
     Payload {
-        session_id: String,
+        browser_epoch: crate::request::BrowserEpoch,
         id: String,
         result: Result<SanitizedPayload>,
     },

@@ -419,6 +419,54 @@ async fn stale_search_result_cannot_replace_a_newer_query() {
 }
 
 #[tokio::test]
+async fn results_from_a_replaced_browser_are_rejected_for_the_same_session() {
+    let temp = TempDir::new().unwrap();
+    write_rollout(
+        temp.path(),
+        ROOT_ID,
+        ROOT_ID,
+        /*parent*/ None,
+        "same session needle",
+    );
+    let catalog = TraceRepository::new(temp.path().to_path_buf())
+        .discover()
+        .await;
+    let trace = catalog.load_session(ROOT_ID).await.unwrap();
+
+    let mut previous = browser_with_epoch(trace.clone(), 1);
+    previous.begin_search(super::browser::SearchScope::Visible);
+    for character in "needle".chars() {
+        previous.search_push(character);
+    }
+    previous.accept_search();
+    let stale_search = previous.take_search_job().unwrap().run();
+    let mut current = browser_with_epoch(trace.clone(), 2);
+    current.begin_search(super::browser::SearchScope::Visible);
+    for character in "needle".chars() {
+        current.search_push(character);
+    }
+    current.accept_search();
+    let current_search = current.take_search_job().unwrap().run();
+    current.install_search(stale_search);
+    assert!(current.search.as_ref().unwrap().loading);
+    current.install_search(current_search);
+    assert!(!current.search.as_ref().unwrap().loading);
+
+    let mut previous = browser_with_epoch(trace.clone(), 3);
+    open_record_detail(&mut previous);
+    assert!(previous.detail_lines(/*width*/ 40).is_empty());
+    let stale_detail = previous.take_detail_render_job().unwrap().run();
+    let mut current = browser_with_epoch(trace, 4);
+    open_record_detail(&mut current);
+    assert!(current.detail_lines(/*width*/ 40).is_empty());
+    let current_detail = current.take_detail_render_job().unwrap().run();
+    current.install_detail_render(stale_detail);
+    assert!(current.detail_lines(/*width*/ 40).is_empty());
+    current.install_detail_render(current_detail);
+    assert!(!current.detail_lines(/*width*/ 40).is_empty());
+}
+
+#[tokio::test]
 async fn enter_requests_raw_payload_without_eagerly_reading_it() {
     let temp = TempDir::new().unwrap();
     let bundle = temp.path().join("bundle");
@@ -462,7 +510,7 @@ async fn enter_requests_raw_payload_without_eagerly_reading_it() {
     app.handle_key(key(KeyCode::Down));
     assert_snapshot!("raw_payload_collapsed", render_app(&mut app, 100, 24));
     let AppAction::ReadPayload {
-        session_id,
+        browser_epoch,
         id,
         handle,
         limit,
@@ -472,7 +520,7 @@ async fn enter_requests_raw_payload_without_eagerly_reading_it() {
     };
     let observed = handle.read(limit).await.unwrap();
     app.install_payload(
-        "different-session",
+        super::request::BrowserEpoch::new(999),
         id.clone(),
         Ok(SanitizedPayload {
             text: "stale payload".to_string(),
@@ -482,7 +530,7 @@ async fn enter_requests_raw_payload_without_eagerly_reading_it() {
     );
     assert!(render_app(&mut app, 100, 24).contains("loading exact raw artifact"));
     app.install_payload(
-        &session_id,
+        browser_epoch,
         id.clone(),
         Ok(SanitizedPayload {
             text: format!(
@@ -502,7 +550,7 @@ async fn enter_requests_raw_payload_without_eagerly_reading_it() {
     let large_render = render_app(&mut app, 100, 24);
     assert!(!large_render.contains("TAIL-MUST-NOT-BE-EAGER"));
     app.install_payload(
-        &session_id,
+        browser_epoch,
         id,
         Err(anyhow::anyhow!("bad \u{1b}[31m payload\u{7} path")),
     );
@@ -661,6 +709,30 @@ fn selected_id(app: &App) -> String {
 fn complete_search(app: &mut App) {
     let job = app.take_search_job().expect("expected search job");
     app.install_search(job.run());
+}
+
+fn browser_with_epoch(
+    trace: codex_trace::SessionTrace,
+    epoch: u64,
+) -> super::browser::BrowserState {
+    super::browser::BrowserState::with_visuals(
+        trace,
+        TraceViewOptions::default(),
+        Arc::new(PlainTraceVisualRenderer),
+        super::request::BrowserEpoch::new(epoch),
+    )
+}
+
+fn open_record_detail(browser: &mut super::browser::BrowserState) {
+    while browser
+        .selected_node()
+        .is_some_and(|node| node.locator.kind != TraceNodeKind::Thread)
+    {
+        browser.move_vertical(/*delta*/ 1);
+    }
+    browser.enter_selected();
+    browser.last();
+    browser.open_detail();
 }
 
 fn move_to_kind(app: &mut App, kind: TraceNodeKind) {

@@ -241,13 +241,14 @@ pub(crate) fn handle_browser_key(browser: &mut BrowserState, key: KeyEvent) -> (
 
 /// Starts a bounded raw-payload read for the selected record when available.
 fn read_selected_payload(browser: &mut BrowserState) -> AppAction {
-    let session_id = browser.session_id().to_string();
     browser
         .selected_payload_request()
-        .map_or(AppAction::None, |(id, handle)| AppAction::ReadPayload {
-            session_id,
-            id,
-            handle,
-            limit: PayloadReadLimit::DEFAULT,
+        .map_or(AppAction::None, |(browser_epoch, id, handle)| {
+            AppAction::ReadPayload {
+                browser_epoch,
+                id,
+                handle,
+                limit: PayloadReadLimit::DEFAULT,
+            }
         })
 }

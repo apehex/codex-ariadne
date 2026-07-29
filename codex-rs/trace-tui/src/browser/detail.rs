@@ -11,11 +11,11 @@ use ratatui::text::Line;
 use super::BrowserState;
 use super::DetailCache;
 use super::PayloadState;
-use super::PendingDetail;
 use crate::ContentMode;
 use crate::jobs::DetailRenderJob;
 use crate::jobs::DetailRenderKey;
 use crate::jobs::DetailRenderResult;
+use crate::request::BrowserEpoch;
 
 impl BrowserState {
     /// Opens the selected leaf in full-screen semantic detail mode.
@@ -63,31 +63,32 @@ impl BrowserState {
                 .unwrap_or_default();
         }
         if self
-            .pending_detail
-            .as_ref()
-            .is_none_or(|pending| pending.key != key)
+            .detail_requests
+            .pending_key()
+            .is_none_or(|pending| *pending != key)
         {
             self.detail_cache = None;
-            self.detail_generation = self.detail_generation.wrapping_add(1);
-            self.pending_detail = Some(PendingDetail {
-                key: key.clone(),
-                generation: self.detail_generation,
+            let trace = Arc::clone(&self.trace);
+            let index = Arc::clone(&self.index);
+            let payload = self.payloads.get(&node.locator.id).and_then(|state| {
+                if let PayloadState::Loaded(payload) = state {
+                    Some(Arc::clone(payload))
+                } else {
+                    None
+                }
             });
-            self.queued_detail_job = Some(DetailRenderJob {
-                key,
-                generation: self.detail_generation,
-                trace: Arc::clone(&self.trace),
-                index: Arc::clone(&self.index),
-                payload: self.payloads.get(&node.locator.id).and_then(|state| {
-                    if let PayloadState::Loaded(payload) = state {
-                        Some(Arc::clone(payload))
-                    } else {
-                        None
-                    }
-                }),
-                cwd: self.trace.summary.cwd.clone(),
-                renderer: Arc::clone(&self.renderer),
-            });
+            let cwd = self.trace.summary.cwd.clone();
+            let renderer = Arc::clone(&self.renderer);
+            self.detail_requests
+                .submit(key.clone(), move |token| DetailRenderJob {
+                    key,
+                    token,
+                    trace,
+                    index,
+                    payload,
+                    cwd,
+                    renderer,
+                });
         }
         &[]
     }
@@ -107,18 +108,14 @@ impl BrowserState {
 
     /// Takes the next queued detail-render job.
     pub(crate) fn take_detail_render_job(&mut self) -> Option<DetailRenderJob> {
-        self.queued_detail_job.take()
+        self.detail_requests.take_job()
     }
 
-    /// Installs a detail result only when its generation and view key are current.
+    /// Installs a detail result only when its browser, generation, and view key are current.
     pub(crate) fn install_detail_render(&mut self, result: DetailRenderResult) {
-        let matches_pending = self.pending_detail.as_ref().is_some_and(|pending| {
-            pending.generation == result.generation && pending.key == result.key
-        });
-        if !matches_pending {
+        if !self.detail_requests.accept(result.token, &result.key) {
             return;
         }
-        self.pending_detail = None;
         let is_current = self
             .selected_node()
             .is_some_and(|node| node.locator == result.key.locator)
@@ -135,7 +132,9 @@ impl BrowserState {
     }
 
     /// Marks the selected payload as loading and returns its lazy read handle.
-    pub(crate) fn selected_payload_request(&mut self) -> Option<(String, RawPayloadHandle)> {
+    pub(crate) fn selected_payload_request(
+        &mut self,
+    ) -> Option<(BrowserEpoch, String, RawPayloadHandle)> {
         let node = self.selected_node()?;
         if node.locator.kind != TraceNodeKind::RawPayload {
             return None;
@@ -148,17 +147,17 @@ impl BrowserState {
         self.payloads.insert(id.clone(), PayloadState::Loading);
         self.payload_generation = self.payload_generation.wrapping_add(1);
         self.invalidate_detail();
-        Some((id, handle))
+        Some((self.epoch, id, handle))
     }
 
     /// Installs a completed payload read and invalidates dependent render state.
     pub(crate) fn install_payload(
         &mut self,
-        session_id: &str,
+        browser_epoch: BrowserEpoch,
         id: String,
         result: Result<SanitizedPayload>,
     ) {
-        if self.trace.summary.session_id != session_id {
+        if self.epoch != browser_epoch {
             return;
         }
         let state = match result {
@@ -183,7 +182,6 @@ impl BrowserState {
     /// Invalidates all cached and queued detail work.
     pub(super) fn invalidate_detail(&mut self) {
         self.detail_cache = None;
-        self.pending_detail = None;
-        self.queued_detail_job = None;
+        self.detail_requests.invalidate();
     }
 }

@@ -5,6 +5,7 @@ use std::sync::Arc;
 use codex_trace::TraceRecordClass;
 
 use super::BrowserState;
+use super::SearchRequestKey;
 use super::SearchScope;
 use super::SearchState;
 use super::move_index;
@@ -78,20 +79,24 @@ impl BrowserState {
             if query.trim().is_empty() {
                 return;
             }
-            self.search_generation = self.search_generation.wrapping_add(1);
-            let generation = self.search_generation;
             if let Some(search) = &mut self.search {
                 search.loading = true;
                 search.hits.clear();
             }
-            self.pending_search_generation = Some(generation);
-            self.queued_search_job = Some(SearchJob {
-                generation,
+            let key = SearchRequestKey {
+                query: query.clone(),
+                scope,
+            };
+            let trace = Arc::clone(&self.trace);
+            let index = Arc::clone(&self.index);
+            let visible_classes = self.visible_classes.clone();
+            self.search_requests.submit(key, move |token| SearchJob {
+                token,
                 query,
                 scope,
-                trace: Arc::clone(&self.trace),
-                index: Arc::clone(&self.index),
-                visible_classes: self.visible_classes.clone(),
+                trace,
+                index,
+                visible_classes,
             });
             return;
         }
@@ -110,21 +115,21 @@ impl BrowserState {
 
     /// Takes the next queued semantic-search job.
     pub(crate) fn take_search_job(&mut self) -> Option<SearchJob> {
-        self.queued_search_job.take()
+        self.search_requests.take_job()
     }
 
-    /// Installs search results only when their generation, scope, and query remain current.
+    /// Installs search results only when their browser, generation, scope, and query are current.
     pub(crate) fn install_search(&mut self, result: SearchResult) {
-        if self.pending_search_generation != Some(result.generation) {
+        let key = SearchRequestKey {
+            query: result.query.clone(),
+            scope: result.scope,
+        };
+        if !self.search_requests.accept(result.token, &key) {
             return;
         }
-        self.pending_search_generation = None;
         let Some(search) = &mut self.search else {
             return;
         };
-        if search.query != result.query || search.scope != result.scope {
-            return;
-        }
         search.hits = result.hits;
         search.selected = 0;
         search.loading = false;
@@ -196,9 +201,7 @@ impl BrowserState {
 
     /// Invalidates generation-tagged search work.
     fn invalidate_search_job(&mut self) {
-        self.search_generation = self.search_generation.wrapping_add(1);
-        self.pending_search_generation = None;
-        self.queued_search_job = None;
+        self.search_requests.invalidate();
     }
 
     /// Invalidates visible-only results after record visibility changes.

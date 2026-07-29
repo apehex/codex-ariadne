@@ -22,16 +22,24 @@ use crate::jobs::DetailRenderResult;
 use crate::jobs::SearchJob;
 use crate::jobs::SearchResult;
 use crate::picker::PickerState;
+use crate::request::BrowserEpoch;
 
 pub(crate) struct App {
     pub(crate) screen: Screen,
     pub(crate) catalog: Option<TraceCatalog>,
     preferred_session: Option<String>,
     auto_open_rich: bool,
-    pending_session: Option<String>,
+    pending_session: Option<PendingSession>,
+    next_browser_epoch: u64,
     pub(crate) notice: Option<String>,
     options: TraceViewOptions,
     renderer: Arc<dyn TraceVisualRenderer>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PendingSession {
+    session_id: String,
+    browser_epoch: BrowserEpoch,
 }
 
 #[derive(Debug)]
@@ -47,9 +55,12 @@ pub(crate) enum AppAction {
     None,
     Quit,
     CancelJob,
-    LoadSession(String),
-    ReadPayload {
+    LoadSession {
         session_id: String,
+        browser_epoch: BrowserEpoch,
+    },
+    ReadPayload {
+        browser_epoch: BrowserEpoch,
         id: String,
         handle: RawPayloadHandle,
         limit: PayloadReadLimit,
@@ -79,6 +90,7 @@ impl App {
             preferred_session,
             auto_open_rich,
             pending_session: None,
+            next_browser_epoch: 0,
             notice: None,
             options,
             renderer,
@@ -118,17 +130,24 @@ impl App {
         });
         self.catalog = Some(catalog);
         if let Some(id) = valid_id {
-            self.pending_session = Some(id.clone());
-            self.screen = Screen::Loading(format!("loading session {id}"));
-            AppAction::LoadSession(id)
+            self.begin_session_load(id)
         } else {
             self.screen = Screen::Picker(PickerState::new(self.catalog.as_ref()));
             AppAction::None
         }
     }
 
-    pub(crate) fn install_browser(&mut self, session_id: &str, browser: BrowserState) {
-        if self.pending_session.as_deref() != Some(session_id) {
+    pub(crate) fn install_browser(
+        &mut self,
+        session_id: &str,
+        browser_epoch: BrowserEpoch,
+        browser: BrowserState,
+    ) {
+        let expected = PendingSession {
+            session_id: session_id.to_string(),
+            browser_epoch,
+        };
+        if self.pending_session.as_ref() != Some(&expected) || browser.epoch() != browser_epoch {
             return;
         }
         self.pending_session = None;
@@ -143,21 +162,31 @@ impl App {
     #[cfg(test)]
     pub(crate) fn install_session(&mut self, trace: SessionTrace) {
         let session_id = trace.summary.session_id.clone();
-        self.pending_session = Some(session_id.clone());
+        let browser_epoch = self.next_browser_epoch();
+        self.pending_session = Some(PendingSession {
+            session_id: session_id.clone(),
+            browser_epoch,
+        });
         self.install_browser(
             &session_id,
-            BrowserState::with_visuals(trace, self.options.clone(), Arc::clone(&self.renderer)),
+            browser_epoch,
+            BrowserState::with_visuals(
+                trace,
+                self.options.clone(),
+                Arc::clone(&self.renderer),
+                browser_epoch,
+            ),
         );
     }
 
     pub(crate) fn install_payload(
         &mut self,
-        session_id: &str,
+        browser_epoch: BrowserEpoch,
         id: String,
         result: anyhow::Result<SanitizedPayload>,
     ) {
         if let Screen::Browser(browser) = &mut self.screen {
-            browser.install_payload(session_id, id, result);
+            browser.install_payload(browser_epoch, id, result);
         }
     }
 
@@ -203,6 +232,26 @@ impl App {
             self.notice = Some("loading cancelled".to_string());
             self.screen = Screen::Picker(PickerState::new(self.catalog.as_ref()));
         }
+    }
+
+    /// Begins one uniquely identified selected-session load.
+    fn begin_session_load(&mut self, session_id: String) -> AppAction {
+        let browser_epoch = self.next_browser_epoch();
+        self.pending_session = Some(PendingSession {
+            session_id: session_id.clone(),
+            browser_epoch,
+        });
+        self.screen = Screen::Loading(format!("loading session {session_id}"));
+        AppAction::LoadSession {
+            session_id,
+            browser_epoch,
+        }
+    }
+
+    /// Allocates an epoch that is never reused by this application instance.
+    fn next_browser_epoch(&mut self) -> BrowserEpoch {
+        self.next_browser_epoch = self.next_browser_epoch.wrapping_add(1);
+        BrowserEpoch::new(self.next_browser_epoch)
     }
 
     pub(crate) fn handle_key(&mut self, key: KeyEvent) -> AppAction {
@@ -288,9 +337,7 @@ impl App {
                             })
                             .map(|session| session.session_id.clone());
                         if let Some(id) = id {
-                            self.pending_session = Some(id.clone());
-                            self.screen = Screen::Loading(format!("loading session {id}"));
-                            AppAction::LoadSession(id)
+                            self.begin_session_load(id)
                         } else {
                             AppAction::None
                         }

@@ -20,6 +20,7 @@ use crate::ContentMode;
 use crate::TraceRenderRequest;
 use crate::TraceVisualRenderer;
 use crate::browser::SearchScope;
+use crate::request::RequestToken;
 
 const STRUCTURED_DETAIL_LIMIT: usize = 64 * 1024;
 
@@ -35,7 +36,7 @@ pub(crate) struct DetailRenderKey {
 /// Owned background work needed to prepare one detail surface.
 pub(crate) struct DetailRenderJob {
     pub(crate) key: DetailRenderKey,
-    pub(crate) generation: u64,
+    pub(crate) token: RequestToken,
     pub(crate) trace: Arc<SessionTrace>,
     pub(crate) index: Arc<TraceIndex>,
     pub(crate) payload: Option<Arc<SanitizedPayload>>,
@@ -46,7 +47,7 @@ pub(crate) struct DetailRenderJob {
 /// Completed detail output that can be rejected when its generation is stale.
 pub(crate) struct DetailRenderResult {
     pub(crate) key: DetailRenderKey,
-    pub(crate) generation: u64,
+    pub(crate) token: RequestToken,
     pub(crate) truncated: bool,
     pub(crate) lines: Vec<Line<'static>>,
 }
@@ -68,7 +69,7 @@ impl DetailRenderJob {
         });
         DetailRenderResult {
             key: self.key,
-            generation: self.generation,
+            token: self.token,
             truncated: document.truncated,
             lines,
         }
@@ -77,7 +78,7 @@ impl DetailRenderJob {
 
 /// Owned background search over one immutable trace and filter snapshot.
 pub(crate) struct SearchJob {
-    pub(crate) generation: u64,
+    pub(crate) token: RequestToken,
     pub(crate) query: String,
     pub(crate) scope: SearchScope,
     pub(crate) trace: Arc<SessionTrace>,
@@ -87,7 +88,7 @@ pub(crate) struct SearchJob {
 
 /// Attributed hits tagged with the submitted query generation.
 pub(crate) struct SearchResult {
-    pub(crate) generation: u64,
+    pub(crate) token: RequestToken,
     pub(crate) query: String,
     pub(crate) scope: SearchScope,
     pub(crate) hits: Vec<SearchHit>,
@@ -108,7 +109,7 @@ impl SearchJob {
             })
             .collect();
         SearchResult {
-            generation: self.generation,
+            token: self.token,
             query: self.query,
             scope: self.scope,
             hits,

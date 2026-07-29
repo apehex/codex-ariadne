@@ -20,6 +20,8 @@ use crate::TraceVisualRenderer;
 use crate::jobs::DetailRenderJob;
 use crate::jobs::DetailRenderKey;
 use crate::jobs::SearchJob;
+use crate::request::BrowserEpoch;
+use crate::request::LatestRequest;
 
 mod detail;
 mod search;
@@ -56,19 +58,21 @@ pub(crate) struct SearchState {
     pub(crate) completed_query: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SearchRequestKey {
+    query: String,
+    scope: SearchScope,
+}
+
 struct DetailCache {
     key: DetailRenderKey,
     truncated: bool,
     lines: Vec<Line<'static>>,
 }
 
-struct PendingDetail {
-    key: DetailRenderKey,
-    generation: u64,
-}
-
 /// Locator-based state for one single-depth trace list or full-screen record.
 pub(crate) struct BrowserState {
+    epoch: BrowserEpoch,
     trace: Arc<SessionTrace>,
     index: Arc<TraceIndex>,
     container: Option<TraceNodeLocator>,
@@ -84,9 +88,7 @@ pub(crate) struct BrowserState {
     pub(crate) content_mode: ContentMode,
     pub(crate) search: Option<SearchState>,
     last_search: Option<SearchState>,
-    search_generation: u64,
-    pending_search_generation: Option<u64>,
-    queued_search_job: Option<SearchJob>,
+    search_requests: LatestRequest<SearchRequestKey, SearchJob>,
     pub(crate) filter_open: bool,
     pub(crate) filter_index: usize,
     pub(crate) help_open: bool,
@@ -97,9 +99,7 @@ pub(crate) struct BrowserState {
     payloads: BTreeMap<String, PayloadState>,
     payload_generation: u64,
     detail_cache: Option<DetailCache>,
-    pending_detail: Option<PendingDetail>,
-    queued_detail_job: Option<DetailRenderJob>,
-    detail_generation: u64,
+    detail_requests: LatestRequest<DetailRenderKey, DetailRenderJob>,
     renderer: Arc<dyn TraceVisualRenderer>,
     options: TraceViewOptions,
 }
@@ -124,6 +124,7 @@ impl BrowserState {
             trace,
             TraceViewOptions::default(),
             Arc::new(PlainTraceVisualRenderer),
+            BrowserEpoch::TEST,
         )
     }
 
@@ -131,6 +132,7 @@ impl BrowserState {
         trace: SessionTrace,
         options: TraceViewOptions,
         renderer: Arc<dyn TraceVisualRenderer>,
+        epoch: BrowserEpoch,
     ) -> Self {
         let index = Arc::new(TraceIndex::new(&trace));
         let trace = Arc::new(trace);
@@ -140,6 +142,7 @@ impl BrowserState {
             .or_else(|| index.root_nodes(&trace).next())
             .map(|node| node.locator.clone());
         let mut state = Self {
+            epoch,
             trace,
             index,
             container,
@@ -155,9 +158,7 @@ impl BrowserState {
             content_mode: ContentMode::Rendered,
             search: None,
             last_search: None,
-            search_generation: 0,
-            pending_search_generation: None,
-            queued_search_job: None,
+            search_requests: LatestRequest::new(epoch),
             filter_open: false,
             filter_index: 0,
             help_open: false,
@@ -168,9 +169,7 @@ impl BrowserState {
             payloads: BTreeMap::new(),
             payload_generation: 0,
             detail_cache: None,
-            pending_detail: None,
-            queued_detail_job: None,
-            detail_generation: 0,
+            detail_requests: LatestRequest::new(epoch),
             renderer,
             options,
         };
@@ -182,9 +181,9 @@ impl BrowserState {
         &self.options
     }
 
-    /// Returns the stable root-session identity owned by this browser.
-    pub(crate) fn session_id(&self) -> &str {
-        &self.trace.summary.session_id
+    /// Returns the unique identity of this installed browser instance.
+    pub(crate) fn epoch(&self) -> BrowserEpoch {
+        self.epoch
     }
 
     pub(crate) fn renderer(&self) -> &dyn TraceVisualRenderer {
