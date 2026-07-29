@@ -310,6 +310,39 @@ async fn view_options_control_columns_headers_and_previews() {
 }
 
 #[tokio::test]
+async fn overview_fields_are_rendered_as_single_terminal_lines() {
+    let temp = TempDir::new().unwrap();
+    write_rollout(
+        temp.path(),
+        ROOT_ID,
+        ROOT_ID,
+        /*parent*/ None,
+        "semantic content",
+    );
+    let catalog = TraceRepository::new(temp.path().to_path_buf())
+        .discover()
+        .await;
+    let mut trace = catalog.load_session(ROOT_ID).await.unwrap();
+    let thread = trace
+        .nodes
+        .iter_mut()
+        .find(|node| node.locator.kind == TraceNodeKind::Thread)
+        .unwrap();
+    thread.label = "thread\ncontinued\t\u{1b}[31m".to_string();
+    thread.presentation.preview = Some("preview\ncontinued\t\u{7}".to_string());
+    let mut app = App::loading(
+        /*preferred_session*/ None, /*auto_open_rich*/ false,
+    );
+    app.install_session(trace);
+
+    let rendered = render_app(&mut app, 100, 12);
+
+    assert!(!rendered.contains('\u{1b}'));
+    assert!(!rendered.contains('\u{7}'));
+    assert_snapshot!("single_line_overview_controls", rendered);
+}
+
+#[tokio::test]
 async fn stale_detail_render_cannot_replace_a_newer_content_mode() {
     let temp = TempDir::new().unwrap();
     write_rollout(

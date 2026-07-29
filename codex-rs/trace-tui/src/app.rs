@@ -21,6 +21,7 @@ use crate::jobs::DetailRenderJob;
 use crate::jobs::DetailRenderResult;
 use crate::jobs::SearchJob;
 use crate::jobs::SearchResult;
+use crate::picker::PickerAction;
 use crate::picker::PickerState;
 use crate::request::BrowserEpoch;
 
@@ -271,80 +272,16 @@ impl App {
                 }
                 _ => AppAction::None,
             },
-            Screen::Picker(picker) => {
-                let session_count = picker.match_count();
-                if picker.search.is_some() {
-                    match key.code {
-                        KeyCode::Esc => {
-                            picker.cancel_search();
-                            return AppAction::None;
-                        }
-                        KeyCode::Enter => {}
-                        KeyCode::Backspace => {
-                            picker.pop_search();
-                            return AppAction::None;
-                        }
-                        KeyCode::Down => {
-                            picker.selected = picker
-                                .selected
-                                .saturating_add(1)
-                                .min(session_count.saturating_sub(1));
-                            return AppAction::None;
-                        }
-                        KeyCode::Up => {
-                            picker.selected = picker.selected.saturating_sub(1);
-                            return AppAction::None;
-                        }
-                        KeyCode::Char(ch) => {
-                            picker.push_search(ch);
-                            return AppAction::None;
-                        }
-                        _ => return AppAction::None,
-                    }
-                }
-                match key.code {
-                    KeyCode::Char('q') | KeyCode::Esc => AppAction::Quit,
-                    KeyCode::Down | KeyCode::Char('j') => {
-                        picker.selected = picker
-                            .selected
-                            .saturating_add(1)
-                            .min(session_count.saturating_sub(1));
-                        AppAction::None
-                    }
-                    KeyCode::Up | KeyCode::Char('k') => {
-                        picker.selected = picker.selected.saturating_sub(1);
-                        AppAction::None
-                    }
-                    KeyCode::Home | KeyCode::Char('g') => {
-                        picker.selected = 0;
-                        AppAction::None
-                    }
-                    KeyCode::End | KeyCode::Char('G') => {
-                        picker.selected = session_count.saturating_sub(1);
-                        AppAction::None
-                    }
-                    KeyCode::Char('/') => {
-                        picker.begin_search();
-                        AppAction::None
-                    }
-                    KeyCode::Enter => {
-                        let id = picker
-                            .selected_catalog_index()
-                            .and_then(|index| {
-                                self.catalog
-                                    .as_ref()
-                                    .and_then(|catalog| catalog.sessions.get(index))
-                            })
-                            .map(|session| session.session_id.clone());
-                        if let Some(id) = id {
-                            self.begin_session_load(id)
-                        } else {
-                            AppAction::None
-                        }
-                    }
-                    _ => AppAction::None,
-                }
-            }
+            Screen::Picker(picker) => match picker.handle_key(key.code) {
+                PickerAction::Stay => AppAction::None,
+                PickerAction::Quit => AppAction::Quit,
+                PickerAction::Open(index) => self
+                    .catalog
+                    .as_ref()
+                    .and_then(|catalog| catalog.sessions.get(index))
+                    .map(|session| session.session_id.clone())
+                    .map_or(AppAction::None, |id| self.begin_session_load(id)),
+            },
             Screen::Browser(browser) => {
                 let (action, return_to_picker) = handle_browser_key(browser, key);
                 if return_to_picker {

@@ -9,6 +9,7 @@ mod jobs;
 mod picker;
 mod render;
 mod request;
+mod selection;
 mod view;
 
 pub use codex_trace::EvidenceGrade;

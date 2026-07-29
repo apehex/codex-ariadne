@@ -20,9 +20,9 @@ use super::kind_name;
 use super::kind_tag;
 use super::mode_name;
 use super::render_message;
-use super::sanitize;
 use super::source_name;
 use super::status_name;
+use super::text::single_line;
 use crate::browser::BrowserState;
 use crate::browser::SearchScope;
 
@@ -42,7 +42,7 @@ pub(super) fn render_detail(frame: &mut Frame<'_>, area: Rect, browser: &mut Bro
         format!("timestamp: {}", node.timestamp.as_deref().unwrap_or("—")),
         format!("source: {}", source_name(node.provenance)),
         format!("evidence: {}", evidence_name(node.evidence)),
-        format!("id: {}", sanitize(&node.locator.id)),
+        format!("id: {}", single_line(&node.locator.id)),
     ];
     let mode = mode_name(browser.content_mode);
     let inner_width = usize::from(area.width.saturating_sub(4).max(1));
@@ -51,7 +51,7 @@ pub(super) fn render_detail(frame: &mut Frame<'_>, area: Rect, browser: &mut Bro
     let content = browser.detail_lines(inner_width).to_vec();
     let mut lines = metadata.into_iter().map(Line::from).collect::<Vec<_>>();
     if let Some(notice) = browser.payload_notice() {
-        lines.push(Line::from(format!("raw: {}", sanitize(notice))).red());
+        lines.push(Line::from(format!("raw: {}", single_line(notice))).red());
     }
     if browser.detail_truncated() {
         lines.push(Line::from("content truncated at the safe display bound").magenta());
@@ -92,7 +92,7 @@ pub(super) fn render_search(frame: &mut Frame<'_>, area: Rect, browser: &Browser
     let [input, results] =
         Layout::vertical([Constraint::Length(3), Constraint::Min(2)]).areas(area);
     frame.render_widget(
-        Paragraph::new(format!("/{}", sanitize(&search.query))).block(
+        Paragraph::new(format!("/{}", single_line(&search.query))).block(
             Block::default()
                 .title(format!(" Search {scope} "))
                 .borders(Borders::ALL),
@@ -119,13 +119,13 @@ pub(super) fn render_search(frame: &mut Frame<'_>, area: Rect, browser: &Browser
                     source_name(hit.provenance),
                     evidence_name(hit.evidence),
                     hit.field,
-                    sanitize(&hit.snippet)
+                    single_line(&hit.snippet)
                 ))
             })
             .collect()
     };
-    let mut state =
-        ListState::default().with_selected((!search.hits.is_empty()).then_some(search.selected));
+    let mut state = ListState::default()
+        .with_selected((!search.hits.is_empty()).then_some(search.selection.index()));
     frame.render_stateful_widget(
         List::new(items)
             .block(Block::default().title(" Results ").borders(Borders::ALL))
@@ -149,7 +149,7 @@ pub(super) fn render_filter(frame: &mut Frame<'_>, area: Rect, browser: &Browser
             ListItem::new(format!("[{checked}] {}", class_name(*class)))
         })
         .collect::<Vec<_>>();
-    let mut state = ListState::default().with_selected(Some(browser.filter_index));
+    let mut state = ListState::default().with_selected(Some(browser.filter_selection.index()));
     frame.render_stateful_widget(
         List::new(items)
             .block(

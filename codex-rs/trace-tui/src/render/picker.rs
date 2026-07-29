@@ -12,9 +12,9 @@ use ratatui::widgets::ListState;
 
 use super::evidence_name;
 use super::render_message;
-use super::sanitize;
 use super::source_name;
 use super::status_name;
+use super::text::single_line;
 use crate::picker::PickerState;
 
 /// Renders fixed diagnostics and only the visible window of matching sessions.
@@ -31,7 +31,7 @@ pub(super) fn render_picker(
     };
     let mut items = Vec::new();
     if let Some(notice) = notice {
-        items.push(ListItem::new(format!("! {}", sanitize(notice)).cyan()));
+        items.push(ListItem::new(format!("! {}", single_line(notice)).cyan()));
     }
     if !catalog.diagnostics.is_empty() {
         items.push(ListItem::new(
@@ -41,7 +41,7 @@ pub(super) fn render_picker(
             items.push(ListItem::new(Line::from(vec![
                 "  ! ".cyan(),
                 format!("[{}] ", evidence_name(diagnostic.evidence)).dim(),
-                sanitize(&diagnostic.message).into(),
+                single_line(&diagnostic.message).into(),
             ])));
         }
         if catalog.diagnostics.len() > 3 {
@@ -51,7 +51,7 @@ pub(super) fn render_picker(
         }
     }
     if let Some(query) = &picker.search {
-        items.push(ListItem::new(format!("/ {}", sanitize(query)).cyan()));
+        items.push(ListItem::new(format!("/ {}", single_line(query)).cyan()));
     }
     let fixed_rows = items.len();
     let visible_session_rows = usize::from(area.height)
@@ -59,7 +59,8 @@ pub(super) fn render_picker(
         .saturating_sub(fixed_rows)
         .max(1);
     let match_start = picker
-        .selected
+        .selection
+        .index()
         .saturating_sub(visible_session_rows.saturating_sub(1));
     for index in picker
         .matches()
@@ -86,7 +87,7 @@ pub(super) fn render_picker(
             "{created:<24} {:<8} {:<9} {thread_count}  {model:<18} {}",
             source_name(session.source),
             status_name(session.status),
-            sanitize(&cwd)
+            single_line(&cwd)
         )));
     }
     if picker.matches().is_empty() {
@@ -95,7 +96,7 @@ pub(super) fn render_picker(
         ));
     }
     let selected = (!picker.matches().is_empty())
-        .then_some(fixed_rows + picker.selected.saturating_sub(match_start));
+        .then_some(fixed_rows + picker.selection.index().saturating_sub(match_start));
     let mut state = ListState::default().with_selected(selected);
     frame.render_stateful_widget(
         List::new(items)

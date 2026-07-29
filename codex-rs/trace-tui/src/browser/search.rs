@@ -8,10 +8,9 @@ use super::BrowserState;
 use super::SearchRequestKey;
 use super::SearchScope;
 use super::SearchState;
-use super::move_index;
-use super::move_wrapped;
 use crate::jobs::SearchJob;
 use crate::jobs::SearchResult;
+use crate::selection::Selection;
 
 impl BrowserState {
     /// Opens an editable semantic search for the selected scope.
@@ -20,7 +19,7 @@ impl BrowserState {
         self.search = Some(SearchState {
             query: String::new(),
             hits: Vec::new(),
-            selected: 0,
+            selection: Selection::default(),
             scope,
             loading: false,
             completed_query: None,
@@ -38,7 +37,7 @@ impl BrowserState {
         if let Some(search) = &mut self.search {
             search.query.push(character);
             search.hits.clear();
-            search.selected = 0;
+            search.selection.first();
             search.loading = false;
             search.completed_query = None;
         }
@@ -50,7 +49,7 @@ impl BrowserState {
         if let Some(search) = &mut self.search {
             search.query.pop();
             search.hits.clear();
-            search.selected = 0;
+            search.selection.first();
             search.loading = false;
             search.completed_query = None;
         }
@@ -60,7 +59,7 @@ impl BrowserState {
     /// Moves within the completed search result set.
     pub(crate) fn move_search(&mut self, delta: isize) {
         if let Some(search) = &mut self.search {
-            search.selected = move_index(search.selected, delta, search.hits.len());
+            search.selection.move_clamped(delta, search.hits.len());
         }
     }
 
@@ -105,7 +104,7 @@ impl BrowserState {
         };
         let locator = search
             .hits
-            .get(search.selected)
+            .get(search.selection.index())
             .map(|hit| hit.locator.clone());
         self.last_search = Some(search);
         if let Some(locator) = locator {
@@ -131,7 +130,7 @@ impl BrowserState {
             return;
         };
         search.hits = result.hits;
-        search.selected = 0;
+        search.selection.first();
         search.loading = false;
         search.completed_query = Some(result.query);
     }
@@ -139,10 +138,10 @@ impl BrowserState {
     /// Moves cyclically among results from the last accepted search.
     pub(crate) fn jump_search(&mut self, delta: isize) {
         let locator = self.last_search.as_mut().and_then(|search| {
-            search.selected = move_wrapped(search.selected, delta, search.hits.len());
+            search.selection.move_wrapped(delta, search.hits.len());
             search
                 .hits
-                .get(search.selected)
+                .get(search.selection.index())
                 .map(|hit| hit.locator.clone())
         });
         if let Some(locator) = locator {
@@ -162,7 +161,10 @@ impl BrowserState {
 
     /// Toggles the highlighted record class while preserving selection when possible.
     pub(crate) fn toggle_filter_class(&mut self) {
-        let Some(class) = Self::filter_classes().get(self.filter_index).copied() else {
+        let Some(class) = Self::filter_classes()
+            .get(self.filter_selection.index())
+            .copied()
+        else {
             return;
         };
         let preferred = self.selected_node().map(|node| node.locator.clone());
@@ -176,7 +178,8 @@ impl BrowserState {
 
     /// Moves within the record-class filter menu.
     pub(crate) fn move_filter(&mut self, delta: isize) {
-        self.filter_index = move_index(self.filter_index, delta, Self::filter_classes().len());
+        self.filter_selection
+            .move_clamped(delta, Self::filter_classes().len());
     }
 
     /// Applies current class visibility and closes the filter menu.

@@ -1,5 +1,4 @@
 use codex_trace::EvidenceGrade;
-use codex_trace::TraceNode;
 use codex_trace::TraceNodeKind;
 use codex_trace::TraceRecordClass;
 use codex_trace::TraceSourceKind;
@@ -17,13 +16,9 @@ use ratatui::widgets::ListItem;
 use ratatui::widgets::ListState;
 use ratatui::widgets::Paragraph;
 use ratatui::widgets::Wrap;
-use unicode_width::UnicodeWidthChar;
-use unicode_width::UnicodeWidthStr;
 
 use crate::ContentMode;
 use crate::HeaderMode;
-use crate::PreviewMode;
-use crate::TraceColumn;
 use crate::TraceRowStyleRequest;
 use crate::app::App;
 use crate::app::Screen;
@@ -31,12 +26,17 @@ use crate::browser::BrowserState;
 
 mod overlay;
 mod picker;
+mod table;
+mod text;
 
 use self::overlay::render_detail;
 use self::overlay::render_filter;
 use self::overlay::render_help;
 use self::overlay::render_search;
 use self::picker::render_picker;
+use self::table::ColumnPlan;
+use self::text::multiline;
+use self::text::single_line;
 
 pub(crate) fn render(frame: &mut Frame<'_>, app: &mut App) {
     let [header, body, footer] = Layout::vertical([
@@ -75,7 +75,7 @@ fn render_header(frame: &mut Frame<'_>, area: Rect, app: &App) {
             " Codex Trace ".bold().cyan(),
             " read-only · offline ".dim(),
             "│ ".dim(),
-            sanitize(&subtitle).into(),
+            single_line(&subtitle).into(),
         ])),
         area,
     );
@@ -103,12 +103,12 @@ fn render_level(frame: &mut Frame<'_>, area: Rect, browser: &mut BrowserState) {
         HeaderMode::Auto => area.width >= 78 && area.height >= 6,
     };
     let inner_width = usize::from(area.width.saturating_sub(2).max(1));
-    let columns = visible_columns(browser, inner_width);
-    browser.omitted_columns = browser
-        .options()
-        .columns
-        .len()
-        .saturating_sub(columns.len());
+    let columns = ColumnPlan::new(
+        &browser.options().columns,
+        browser.options().preview,
+        inner_width,
+    );
+    browser.omitted_columns = columns.omitted();
     let header_rows = usize::from(show_headers);
     let capacity = usize::from(area.height.saturating_sub(2))
         .saturating_sub(header_rows)
@@ -125,28 +125,22 @@ fn render_level(frame: &mut Frame<'_>, area: Rect, browser: &mut BrowserState) {
     let mut items = Vec::with_capacity(rows.len() + header_rows);
     if show_headers {
         items.push(
-            ListItem::new(format_row(
+            ListItem::new(columns.row(
                 /*selected*/ false,
                 "NAME",
-                &columns,
                 /*node*/ None,
                 Some("PREVIEW"),
-                browser.options().preview,
-                inner_width,
             ))
             .style(ratatui::style::Style::new().bold().dim()),
         );
     }
     for (offset, node) in rows.iter().enumerate() {
         let selected = range.start + offset == browser.selected_index();
-        let line = format_row(
+        let line = columns.row(
             selected,
-            &sanitize(&node.label),
-            &columns,
+            &node.label,
             Some(node),
             node.presentation.preview.as_deref(),
-            browser.options().preview,
-            inner_width,
         );
         let style = browser.renderer().row_style(TraceRowStyleRequest {
             class: node.presentation.class,
@@ -169,71 +163,6 @@ fn render_level(frame: &mut Frame<'_>, area: Rect, browser: &mut BrowserState) {
         area,
         &mut state,
     );
-}
-
-fn visible_columns(browser: &BrowserState, width: usize) -> Vec<TraceColumn> {
-    let mut columns = browser.options().columns.clone();
-    let drop_order = [
-        TraceColumn::Identifier,
-        TraceColumn::Timestamp,
-        TraceColumn::Status,
-        TraceColumn::Evidence,
-        TraceColumn::Source,
-        TraceColumn::Kind,
-        TraceColumn::Class,
-    ];
-    for candidate in drop_order {
-        let required = 14
-            + columns
-                .iter()
-                .map(|column| column_width(*column) + 1)
-                .sum::<usize>();
-        if required <= width {
-            break;
-        }
-        if let Some(index) = columns.iter().position(|column| *column == candidate) {
-            columns.remove(index);
-        }
-    }
-    columns
-}
-
-fn format_row(
-    selected: bool,
-    label: &str,
-    columns: &[TraceColumn],
-    node: Option<&TraceNode>,
-    preview: Option<&str>,
-    preview_mode: PreviewMode,
-    width: usize,
-) -> Line<'static> {
-    let fixed = columns
-        .iter()
-        .map(|column| column_width(*column) + 1)
-        .sum::<usize>();
-    let marker = if selected { "▶ " } else { "  " };
-    let allow_preview = match preview_mode {
-        PreviewMode::Auto => width.saturating_sub(fixed + 26) >= 32,
-        PreviewMode::Always => width.saturating_sub(fixed + 18) >= 12,
-        PreviewMode::Never => false,
-    };
-    let preview_width = allow_preview.then_some(width.saturating_sub(fixed + 26));
-    let name_width = width
-        .saturating_sub(fixed + preview_width.unwrap_or_default() + 2)
-        .max(8);
-    let mut text = format!("{marker}{}", pad_fit(label, name_width.saturating_sub(2)));
-    for column in columns {
-        let value = node
-            .map(|node| column_value(*column, node))
-            .unwrap_or_else(|| column_name(*column).to_string());
-        text.push(' ');
-        text.push_str(&pad_fit(&value, column_width(*column)));
-    }
-    if let Some(preview_width) = preview_width {
-        text.push(' ');
-        text.push_str(&fit(&sanitize(preview.unwrap_or_default()), preview_width));
-    }
-    Line::from(text)
 }
 
 fn render_footer(frame: &mut Frame<'_>, area: Rect, app: &App) {
@@ -273,7 +202,7 @@ fn render_footer(frame: &mut Frame<'_>, area: Rect, app: &App) {
 
 fn render_message(frame: &mut Frame<'_>, area: Rect, message: &str, title: &str) {
     frame.render_widget(
-        Paragraph::new(sanitize(message))
+        Paragraph::new(multiline(message))
             .block(
                 Block::default()
                     .title(format!(" {title} "))
@@ -282,85 +211,6 @@ fn render_message(frame: &mut Frame<'_>, area: Rect, message: &str, title: &str)
             .wrap(Wrap { trim: false }),
         area,
     );
-}
-
-fn column_name(column: TraceColumn) -> &'static str {
-    match column {
-        TraceColumn::Kind => "KIND",
-        TraceColumn::Class => "CLASS",
-        TraceColumn::Status => "STATUS",
-        TraceColumn::Timestamp => "TIME",
-        TraceColumn::Source => "SOURCE",
-        TraceColumn::Evidence => "EVIDENCE",
-        TraceColumn::Identifier => "ID",
-    }
-}
-
-fn column_width(column: TraceColumn) -> usize {
-    match column {
-        TraceColumn::Kind => 4,
-        TraceColumn::Class => 12,
-        TraceColumn::Status => 9,
-        TraceColumn::Timestamp => 20,
-        TraceColumn::Source => 8,
-        TraceColumn::Evidence => 13,
-        TraceColumn::Identifier => 16,
-    }
-}
-
-fn column_value(column: TraceColumn, node: &TraceNode) -> String {
-    match column {
-        TraceColumn::Kind => kind_tag(node.locator.kind).to_string(),
-        TraceColumn::Class => class_name(node.presentation.class).to_string(),
-        TraceColumn::Status => node
-            .presentation
-            .status
-            .map_or_else(|| "—".to_string(), |status| status_name(status).to_string()),
-        TraceColumn::Timestamp => node.timestamp.clone().unwrap_or_else(|| "—".to_string()),
-        TraceColumn::Source => source_name(node.provenance).to_string(),
-        TraceColumn::Evidence => evidence_name(node.evidence).to_string(),
-        TraceColumn::Identifier => node.locator.id.clone(),
-    }
-}
-
-fn fit(text: &str, width: usize) -> String {
-    if UnicodeWidthStr::width(text) <= width {
-        return text.to_string();
-    }
-    if width <= 1 {
-        return "…".chars().take(width).collect();
-    }
-    let target = width - 1;
-    let mut used = 0;
-    let mut fitted = String::new();
-    for character in text.chars() {
-        let character_width = character.width().unwrap_or_default();
-        if used + character_width > target {
-            break;
-        }
-        fitted.push(character);
-        used += character_width;
-    }
-    fitted.push('…');
-    fitted
-}
-
-fn pad_fit(text: &str, width: usize) -> String {
-    let mut fitted = fit(text, width);
-    fitted.push_str(&" ".repeat(width.saturating_sub(UnicodeWidthStr::width(fitted.as_str()))));
-    fitted
-}
-
-fn sanitize(text: &str) -> String {
-    text.chars()
-        .map(|character| {
-            if matches!(character, '\n' | '\t') || !character.is_control() {
-                character
-            } else {
-                '�'
-            }
-        })
-        .collect()
 }
 
 fn centered(area: Rect, max_width: u16, percent_height: u16) -> Rect {

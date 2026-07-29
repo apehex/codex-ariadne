@@ -22,6 +22,7 @@ use crate::jobs::DetailRenderKey;
 use crate::jobs::SearchJob;
 use crate::request::BrowserEpoch;
 use crate::request::LatestRequest;
+use crate::selection::Selection;
 
 mod detail;
 mod search;
@@ -52,7 +53,7 @@ pub(crate) enum SearchScope {
 pub(crate) struct SearchState {
     pub(crate) query: String,
     pub(crate) hits: Vec<SearchHit>,
-    pub(crate) selected: usize,
+    pub(crate) selection: Selection,
     pub(crate) scope: SearchScope,
     pub(crate) loading: bool,
     pub(crate) completed_query: Option<String>,
@@ -79,7 +80,7 @@ pub(crate) struct BrowserState {
     stack: Vec<NavigationFrame>,
     rows: Vec<usize>,
     hidden_rows: usize,
-    selected: usize,
+    selection: Selection,
     pub(crate) viewport: usize,
     pub(crate) page_size: usize,
     pub(crate) detail_open: bool,
@@ -90,7 +91,7 @@ pub(crate) struct BrowserState {
     last_search: Option<SearchState>,
     search_requests: LatestRequest<SearchRequestKey, SearchJob>,
     pub(crate) filter_open: bool,
-    pub(crate) filter_index: usize,
+    pub(crate) filter_selection: Selection,
     pub(crate) help_open: bool,
     pub(crate) omitted_columns: usize,
     visible_classes: BTreeSet<TraceRecordClass>,
@@ -110,7 +111,7 @@ impl std::fmt::Debug for BrowserState {
             .debug_struct("BrowserState")
             .field("container", &self.container)
             .field("rows", &self.rows.len())
-            .field("selected", &self.selected)
+            .field("selection", &self.selection)
             .field("detail_open", &self.detail_open)
             .field("content_mode", &self.content_mode)
             .finish()
@@ -149,7 +150,7 @@ impl BrowserState {
             stack: Vec::new(),
             rows: Vec::new(),
             hidden_rows: 0,
-            selected: 0,
+            selection: Selection::default(),
             viewport: 0,
             page_size: 20,
             detail_open: false,
@@ -160,7 +161,7 @@ impl BrowserState {
             last_search: None,
             search_requests: LatestRequest::new(epoch),
             filter_open: false,
-            filter_index: 0,
+            filter_selection: Selection::default(),
             help_open: false,
             omitted_columns: 0,
             visible_classes: TraceRecordClass::ALL.into_iter().collect(),
@@ -213,7 +214,7 @@ impl BrowserState {
     }
 
     pub(crate) fn selected_index(&self) -> usize {
-        self.selected
+        self.selection.index()
     }
 
     pub(crate) fn rows_window(&self, start: usize, len: usize) -> Vec<&TraceNode> {
@@ -227,12 +228,12 @@ impl BrowserState {
 
     pub(crate) fn selected_node(&self) -> Option<&TraceNode> {
         self.rows
-            .get(self.selected)
+            .get(self.selection.index())
             .and_then(|position| self.trace.nodes.get(*position))
     }
 
     pub(crate) fn move_vertical(&mut self, delta: isize) {
-        self.selected = move_index(self.selected, delta, self.rows.len());
+        self.selection.move_clamped(delta, self.rows.len());
         self.finish_list_move();
     }
 
@@ -242,12 +243,12 @@ impl BrowserState {
     }
 
     pub(crate) fn first(&mut self) {
-        self.selected = 0;
+        self.selection.first();
         self.finish_list_move();
     }
 
     pub(crate) fn last(&mut self) {
-        self.selected = self.rows.len().saturating_sub(1);
+        self.selection.last(self.rows.len());
         self.finish_list_move();
     }
 
@@ -331,7 +332,7 @@ impl BrowserState {
             });
         }
         self.hidden_rows = hidden_rows;
-        self.selected = preferred
+        let selected = preferred
             .and_then(|locator| {
                 self.rows.iter().position(|position| {
                     self.trace
@@ -342,6 +343,7 @@ impl BrowserState {
             })
             .unwrap_or(0)
             .min(self.rows.len().saturating_sub(1));
+        self.selection.set(selected, self.rows.len());
         self.invalidate_detail();
     }
 
@@ -378,20 +380,4 @@ impl BrowserState {
         }
         self.detail_scroll = 0;
     }
-}
-
-fn move_index(current: usize, delta: isize, len: usize) -> usize {
-    if len == 0 {
-        return 0;
-    }
-    current
-        .saturating_add_signed(delta)
-        .min(len.saturating_sub(1))
-}
-
-fn move_wrapped(current: usize, delta: isize, len: usize) -> usize {
-    if len == 0 {
-        return 0;
-    }
-    current.wrapping_add_signed(delta) % len
 }
