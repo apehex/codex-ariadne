@@ -2,12 +2,30 @@
 
 mod app;
 mod browser;
+mod jobs;
 mod render;
+mod view;
+
+pub use codex_trace::EvidenceGrade;
+pub use codex_trace::TraceContentDocument;
+pub use codex_trace::TraceContentFormat;
+pub use codex_trace::TraceRecordClass;
+pub use codex_trace::TraceStatus;
+pub use view::ContentMode;
+pub use view::HeaderMode;
+pub use view::PlainTraceVisualRenderer;
+pub use view::PreviewMode;
+pub use view::TraceColumn;
+pub use view::TraceRenderRequest;
+pub use view::TraceRowStyleRequest;
+pub use view::TraceViewOptions;
+pub use view::TraceVisualRenderer;
 
 use std::io::IsTerminal;
 use std::io::stdout;
 use std::path::Path;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Context;
@@ -30,6 +48,8 @@ use tokio::task::JoinHandle;
 use crate::app::App;
 use crate::app::AppAction;
 use crate::browser::BrowserState;
+use crate::jobs::DetailRenderResult;
+use crate::jobs::SearchResult;
 
 /// Arguments for the historical trace browser.
 #[derive(Debug, Clone, Args)]
@@ -53,6 +73,22 @@ pub struct Cli {
 
 /// Runs the trace browser without initializing authentication, models, or networking.
 pub async fn run(cli: Cli, codex_home: PathBuf) -> Result<()> {
+    run_with_renderer(
+        cli,
+        codex_home,
+        TraceViewOptions::default(),
+        Arc::new(PlainTraceVisualRenderer),
+    )
+    .await
+}
+
+/// Runs the trace browser with host-provided view options and content styling.
+pub async fn run_with_renderer(
+    cli: Cli,
+    codex_home: PathBuf,
+    options: TraceViewOptions,
+    renderer: Arc<dyn TraceVisualRenderer>,
+) -> Result<()> {
     if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
         bail!("codex trace requires an interactive terminal");
     }
@@ -69,7 +105,7 @@ pub async fn run(cli: Cli, codex_home: PathBuf) -> Result<()> {
         repository = repository.with_rich_root(PathBuf::from(root));
     }
 
-    let mut app = App::loading(cli.session_id, exact_bundle);
+    let mut app = App::loading_with_visuals(cli.session_id, exact_bundle, options, renderer);
     let mut jobs = vec![tokio::spawn(async move {
         WorkerResult::Catalog(repository.discover().await)
     })];
@@ -99,6 +135,16 @@ async fn run_event_loop(
         terminal
             .draw(|frame| render::render(frame, app))
             .context("render trace browser")?;
+        if let Some(job) = app.take_detail_render_job() {
+            jobs.push(tokio::task::spawn_blocking(move || {
+                WorkerResult::Detail(job.run())
+            }));
+        }
+        if let Some(job) = app.take_search_job() {
+            jobs.push(tokio::task::spawn_blocking(move || {
+                WorkerResult::Search(job.run())
+            }));
+        }
         if event::poll(Duration::from_millis(50)).context("poll terminal events")?
             && let event::Event::Key(key) = event::read().context("read terminal event")?
         {
@@ -125,6 +171,14 @@ fn apply_worker_result(app: &mut App, result: WorkerResult) -> AppAction {
         },
         WorkerResult::Payload { id, result } => {
             app.install_payload(id, result);
+            AppAction::None
+        }
+        WorkerResult::Detail(result) => {
+            app.install_detail_render(result);
+            AppAction::None
+        }
+        WorkerResult::Search(result) => {
+            app.install_search(result);
             AppAction::None
         }
     }
@@ -154,9 +208,13 @@ fn dispatch_action(
                 app.install_error("trace catalog is unavailable".to_string());
                 return false;
             };
+            let (options, renderer) = app.browser_visuals();
             jobs.push(tokio::spawn(async move {
                 WorkerResult::Session(Box::new(
-                    catalog.load_session(&id).await.map(BrowserState::new),
+                    catalog
+                        .load_session(&id)
+                        .await
+                        .map(|trace| BrowserState::with_visuals(trace, options, renderer)),
                 ))
             }));
             false
@@ -225,6 +283,8 @@ enum WorkerResult {
         id: String,
         result: Result<SanitizedPayload>,
     },
+    Detail(DetailRenderResult),
+    Search(SearchResult),
 }
 
 struct TerminalRestore;

@@ -3,6 +3,7 @@ use std::fs::File;
 use std::io::BufWriter;
 use std::io::Write;
 use std::path::Path;
+use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -11,6 +12,7 @@ use codex_rollout_trace::RawPayloadKind;
 use codex_rollout_trace::RawTraceEventPayload;
 use codex_rollout_trace::TraceWriter;
 use codex_trace::SanitizedPayload;
+use codex_trace::TraceNodeKind;
 use codex_trace::TraceRepository;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
@@ -22,6 +24,11 @@ use serde_json::json;
 use tempfile::TempDir;
 
 use super::Cli;
+use super::HeaderMode;
+use super::PlainTraceVisualRenderer;
+use super::PreviewMode;
+use super::TraceColumn;
+use super::TraceViewOptions;
 use super::app::App;
 use super::app::AppAction;
 use super::app::Screen;
@@ -97,8 +104,13 @@ fn trace_root_validation_rejects_missing_and_regular_files() {
 #[tokio::test]
 async fn picker_and_adaptive_browser_have_stable_snapshots() {
     let temp = TempDir::new().unwrap();
-    let root_path = write_rollout(temp.path(), ROOT_ID, None, "root needle");
-    write_rollout(temp.path(), CHILD_ID, Some(ROOT_ID), "child needle");
+    let root_path = write_rollout(temp.path(), ROOT_ID, /*parent*/ None, "root needle");
+    write_rollout(
+        temp.path(),
+        CHILD_ID,
+        /*parent*/ Some(ROOT_ID),
+        "child needle",
+    );
     fs::write(
         temp.path()
             .join("sessions/2026/07/25/rollout-malformed.jsonl"),
@@ -117,7 +129,9 @@ async fn picker_and_adaptive_browser_have_stable_snapshots() {
         });
     }
 
-    let mut picker = App::loading(None, false);
+    let mut picker = App::loading(
+        /*preferred_session*/ None, /*auto_open_rich*/ false,
+    );
     assert!(matches!(
         picker.install_catalog(catalog.clone()),
         AppAction::None
@@ -137,10 +151,9 @@ async fn picker_and_adaptive_browser_have_stable_snapshots() {
         panic!("expected browser");
     };
     assert_eq!(
-        browser.cached_visible_row_count(),
-        browser.visible_rows().len()
+        browser.row_count(),
+        browser.rows_window(0, browser.row_count()).len()
     );
-    assert!(browser.inspector_cached_line_count() <= 28);
     assert_snapshot!("medium_browser", render_app(&mut picker, 96, 26));
     assert_snapshot!("narrow_browser", render_app(&mut picker, 66, 24));
     assert_eq!(fs::read(root_path).unwrap(), before);
@@ -149,20 +162,27 @@ async fn picker_and_adaptive_browser_have_stable_snapshots() {
 #[tokio::test]
 async fn navigation_search_and_parent_keys_preserve_context() {
     let temp = TempDir::new().unwrap();
-    write_rollout(temp.path(), ROOT_ID, None, "root needle");
-    write_rollout(temp.path(), CHILD_ID, Some(ROOT_ID), "child needle");
+    write_rollout(temp.path(), ROOT_ID, /*parent*/ None, "root needle");
+    write_rollout(
+        temp.path(),
+        CHILD_ID,
+        /*parent*/ Some(ROOT_ID),
+        "child needle",
+    );
     let catalog = TraceRepository::new(temp.path().to_path_buf())
         .discover()
         .await;
     let trace = catalog.load_session(ROOT_ID).await.unwrap();
-    let mut app = App::loading(None, false);
+    let mut app = App::loading(
+        /*preferred_session*/ None, /*auto_open_rich*/ false,
+    );
     app.install_session(trace);
 
     let Screen::Browser(browser) = &app.screen else {
         panic!("expected browser");
     };
-    assert_eq!(browser.visible_rows().len(), 2);
-    app.handle_key(key(KeyCode::Down));
+    assert_eq!(browser.row_count(), 1);
+    move_to_kind(&mut app, TraceNodeKind::Thread);
     let thread_id = selected_id(&app);
     app.handle_key(key(KeyCode::Enter));
     let Screen::Browser(browser) = &app.screen else {
@@ -170,13 +190,12 @@ async fn navigation_search_and_parent_keys_preserve_context() {
     };
     assert!(
         browser
-            .visible_rows()
+            .rows_window(0, browser.row_count())
             .iter()
-            .any(|row| row.node.label.contains(CHILD_ID))
+            .any(|node| node.label.contains(CHILD_ID))
     );
-    app.handle_key(key(KeyCode::Enter));
-    app.handle_key(key(KeyCode::Backspace));
-    assert_ne!(selected_id(&app), thread_id);
+    app.handle_key(key(KeyCode::Esc));
+    assert_eq!(selected_id(&app), thread_id);
 
     app.handle_key(key(KeyCode::Char('/')));
     for ch in "needle".chars() {
@@ -184,12 +203,195 @@ async fn navigation_search_and_parent_keys_preserve_context() {
     }
     assert_snapshot!("search_overlay", render_app(&mut app, 100, 25));
     app.handle_key(key(KeyCode::Enter));
+    complete_search(&mut app);
+    app.handle_key(key(KeyCode::Enter));
     let first_hit = selected_id(&app);
     app.handle_key(key(KeyCode::Char('n')));
     assert_ne!(selected_id(&app), first_hit);
     app.handle_key(key(KeyCode::Char('N')));
     assert_eq!(selected_id(&app), first_hit);
     assert_snapshot!("search_navigation", render_app(&mut app, 100, 25));
+}
+
+#[tokio::test]
+async fn detail_modes_filters_and_help_have_stable_snapshots() {
+    let temp = TempDir::new().unwrap();
+    write_rollout(
+        temp.path(),
+        ROOT_ID,
+        /*parent*/ None,
+        "first line\nsecond line with **markdown**",
+    );
+    let catalog = TraceRepository::new(temp.path().to_path_buf())
+        .discover()
+        .await;
+    let trace = catalog.load_session(ROOT_ID).await.unwrap();
+    let mut app = App::loading(
+        /*preferred_session*/ None, /*auto_open_rich*/ false,
+    );
+    app.install_session(trace);
+
+    move_to_kind(&mut app, TraceNodeKind::Thread);
+    app.handle_key(key(KeyCode::Enter));
+    assert_snapshot!("record_level_with_preview", render_app(&mut app, 150, 24));
+
+    move_to_kind(&mut app, TraceNodeKind::RolloutRecord);
+    app.handle_key(key(KeyCode::Down));
+    app.handle_key(key(KeyCode::Char('i')));
+    assert_snapshot!("rendered_record_detail", render_app(&mut app, 100, 24));
+    app.handle_key(key(KeyCode::Char('v')));
+    app.handle_key(key(KeyCode::Char('v')));
+    assert_snapshot!(
+        "normalized_raw_record_detail",
+        render_app(&mut app, 100, 24)
+    );
+    app.handle_key(key(KeyCode::Esc));
+
+    app.handle_key(key(KeyCode::Char('f')));
+    assert_snapshot!("record_filter_overlay", render_app(&mut app, 100, 28));
+    app.handle_key(key(KeyCode::Char(' ')));
+    app.handle_key(key(KeyCode::Enter));
+    let Screen::Browser(browser) = &app.screen else {
+        panic!("expected browser");
+    };
+    assert_eq!(browser.row_count(), 1);
+    app.handle_key(key(KeyCode::Char('F')));
+    app.handle_key(key(KeyCode::Char('?')));
+    assert_snapshot!("trace_help_overlay", render_app(&mut app, 100, 24));
+}
+
+#[tokio::test]
+async fn view_options_control_columns_headers_and_previews() {
+    let temp = TempDir::new().unwrap();
+    write_rollout(temp.path(), ROOT_ID, /*parent*/ None, "PREVIEW-TOKEN");
+    let catalog = TraceRepository::new(temp.path().to_path_buf())
+        .discover()
+        .await;
+    let trace = catalog.load_session(ROOT_ID).await.unwrap();
+    let mut app = App::loading_with_visuals(
+        /*preferred_session*/ None,
+        /*auto_open_rich*/ false,
+        TraceViewOptions {
+            columns: vec![TraceColumn::Class],
+            headers: HeaderMode::Never,
+            preview: PreviewMode::Never,
+        },
+        Arc::new(PlainTraceVisualRenderer),
+    );
+    app.install_session(trace);
+    move_to_kind(&mut app, TraceNodeKind::Thread);
+    app.handle_key(key(KeyCode::Enter));
+
+    let rendered = render_app(&mut app, 100, 20);
+    assert!(!rendered.contains("NAME"));
+    assert!(!rendered.contains("PREVIEW-TOKEN"));
+    assert!(rendered.contains("user"));
+}
+
+#[tokio::test]
+async fn stale_detail_render_cannot_replace_a_newer_content_mode() {
+    let temp = TempDir::new().unwrap();
+    write_rollout(
+        temp.path(),
+        ROOT_ID,
+        /*parent*/ None,
+        "semantic content",
+    );
+    let catalog = TraceRepository::new(temp.path().to_path_buf())
+        .discover()
+        .await;
+    let trace = catalog.load_session(ROOT_ID).await.unwrap();
+    let mut browser = super::browser::BrowserState::new(trace);
+    while browser
+        .selected_node()
+        .is_some_and(|node| node.locator.kind != TraceNodeKind::Thread)
+    {
+        browser.move_vertical(/*delta*/ 1);
+    }
+    browser.enter_selected();
+    browser.last();
+    browser.open_detail();
+
+    assert!(browser.detail_lines(/*width*/ 40).is_empty());
+    let rendered_job = browser.take_detail_render_job().unwrap();
+    browser.cycle_content_mode();
+    assert!(browser.detail_lines(/*width*/ 40).is_empty());
+    let text_job = browser.take_detail_render_job().unwrap();
+
+    browser.install_detail_render(rendered_job.run());
+    assert!(browser.detail_lines(/*width*/ 40).is_empty());
+    browser.install_detail_render(text_job.run());
+    assert!(!browser.detail_lines(/*width*/ 40).is_empty());
+}
+
+#[tokio::test]
+async fn all_record_search_temporarily_reveals_a_filtered_hit() {
+    let temp = TempDir::new().unwrap();
+    write_rollout(
+        temp.path(),
+        ROOT_ID,
+        /*parent*/ None,
+        "visible user content",
+    );
+    let catalog = TraceRepository::new(temp.path().to_path_buf())
+        .discover()
+        .await;
+    let trace = catalog.load_session(ROOT_ID).await.unwrap();
+    let mut browser = super::browser::BrowserState::new(trace);
+    browser.enter_selected();
+    browser.toggle_filter_class();
+    assert_eq!(browser.row_count(), 1);
+
+    browser.begin_search(super::browser::SearchScope::All);
+    for character in "session metadata".chars() {
+        browser.search_push(character);
+    }
+    browser.accept_search();
+    let job = browser.take_search_job().unwrap();
+    browser.install_search(job.run());
+    browser.accept_search();
+    assert_eq!(
+        browser.selected_node().unwrap().presentation.class,
+        codex_trace::TraceRecordClass::Structure
+    );
+    assert_eq!(browser.row_count(), 2);
+
+    browser.move_vertical(/*delta*/ 1);
+    assert_eq!(browser.row_count(), 1);
+}
+
+#[tokio::test]
+async fn stale_search_result_cannot_replace_a_newer_query() {
+    let temp = TempDir::new().unwrap();
+    write_rollout(
+        temp.path(),
+        ROOT_ID,
+        /*parent*/ None,
+        "first needle second",
+    );
+    let catalog = TraceRepository::new(temp.path().to_path_buf())
+        .discover()
+        .await;
+    let trace = catalog.load_session(ROOT_ID).await.unwrap();
+    let mut browser = super::browser::BrowserState::new(trace);
+    browser.begin_search(super::browser::SearchScope::Visible);
+    for character in "first".chars() {
+        browser.search_push(character);
+    }
+    browser.accept_search();
+    let stale_job = browser.take_search_job().unwrap();
+    for character in " needle".chars() {
+        browser.search_push(character);
+    }
+    browser.accept_search();
+    let current_job = browser.take_search_job().unwrap();
+
+    browser.install_search(stale_job.run());
+    assert!(browser.search.as_ref().unwrap().loading);
+    browser.install_search(current_job.run());
+    let search = browser.search.as_ref().unwrap();
+    assert!(!search.loading);
+    assert_eq!(search.completed_query.as_deref(), Some("first needle"));
 }
 
 #[tokio::test]
@@ -222,8 +424,16 @@ async fn enter_requests_raw_payload_without_eagerly_reading_it() {
         .with_rich_bundle(bundle.clone())
         .discover()
         .await;
-    let trace = catalog.load_session("rollout-ui").await.unwrap();
-    let mut app = App::loading(None, false);
+    let mut trace = catalog.load_session("rollout-ui").await.unwrap();
+    for node in &mut trace.nodes {
+        node.timestamp = node
+            .timestamp
+            .as_ref()
+            .map(|_| "2026-07-28T00:00:00Z".to_string());
+    }
+    let mut app = App::loading(
+        /*preferred_session*/ None, /*auto_open_rich*/ false,
+    );
     app.install_session(trace);
     app.handle_key(key(KeyCode::Down));
     assert_snapshot!("raw_payload_collapsed", render_app(&mut app, 100, 24));
@@ -242,16 +452,14 @@ async fn enter_requests_raw_payload_without_eagerly_reading_it() {
             original_bytes_read: observed.original_bytes_read,
         }),
     );
+    app.handle_key(key(KeyCode::Char('v')));
+    app.handle_key(key(KeyCode::Char('v')));
     let Screen::Browser(browser) = &mut app.screen else {
         panic!("expected browser");
     };
-    browser.inspector_scroll = 20;
+    browser.detail_scroll = 20;
     let large_render = render_app(&mut app, 100, 24);
     assert!(!large_render.contains("TAIL-MUST-NOT-BE-EAGER"));
-    let Screen::Browser(browser) = &app.screen else {
-        panic!("expected browser");
-    };
-    assert!(browser.inspector_cached_line_count() <= 22);
     app.install_payload(id, Err(anyhow::anyhow!("bad \u{1b}[31m payload\u{7} path")));
     let rendered = render_app(&mut app, 100, 24);
     assert!(!rendered.contains('\u{1b}'));
@@ -264,7 +472,7 @@ async fn enter_requests_raw_payload_without_eagerly_reading_it() {
 async fn profile_hundred_thousand_node_navigation() {
     const EVENT_COUNT: usize = 100_000;
     const WARM_ACTIONS: usize = 1_000;
-    const EXPANSION_ACTIONS: usize = 20;
+    const LEVEL_ACTIONS: usize = 20;
 
     let temp = TempDir::new().unwrap();
     write_large_rollout(temp.path(), ROOT_ID, EVENT_COUNT);
@@ -277,54 +485,69 @@ async fn profile_hundred_thousand_node_navigation() {
     let build_started = Instant::now();
     let mut browser = super::browser::BrowserState::new(trace);
     let build_elapsed = build_started.elapsed();
-    assert!(browser.cached_visible_row_count() >= 2);
+    assert_eq!(browser.row_count(), 1);
 
-    browser.move_vertical(1);
-    let expand_started = Instant::now();
-    browser.expand();
-    let expand_elapsed = expand_started.elapsed();
-    assert!(browser.cached_visible_row_count() > 50_000);
+    while browser
+        .selected_node()
+        .is_some_and(|node| node.locator.kind != TraceNodeKind::Thread)
+    {
+        browser.move_vertical(/*delta*/ 1);
+    }
+    let entry_started = Instant::now();
+    browser.enter_selected();
+    let entry_elapsed = entry_started.elapsed();
+    assert!(browser.row_count() > 50_000);
 
     let mut samples = Vec::with_capacity(WARM_ACTIONS);
     for _ in 0..WARM_ACTIONS {
         let started = Instant::now();
-        browser.move_vertical(1);
+        browser.move_vertical(/*delta*/ 1);
         samples.push(started.elapsed());
     }
     samples.sort_unstable();
     let navigation_p95 = percentile_95(&samples);
 
     browser.first();
-    browser.move_vertical(1);
-    let mut expansion_samples = Vec::with_capacity(EXPANSION_ACTIONS);
-    let mut collapse_samples = Vec::with_capacity(EXPANSION_ACTIONS);
-    for _ in 0..EXPANSION_ACTIONS {
-        let collapse_started = Instant::now();
-        browser.collapse_or_parent();
-        collapse_samples.push(collapse_started.elapsed());
-        let expansion_started = Instant::now();
-        browser.expand();
-        expansion_samples.push(expansion_started.elapsed());
+    browser.move_vertical(/*delta*/ 1);
+    let mut entry_samples = Vec::with_capacity(LEVEL_ACTIONS);
+    let mut return_samples = Vec::with_capacity(LEVEL_ACTIONS);
+    for _ in 0..LEVEL_ACTIONS {
+        let return_started = Instant::now();
+        browser.back();
+        return_samples.push(return_started.elapsed());
+        while browser
+            .selected_node()
+            .is_some_and(|node| node.locator.kind != TraceNodeKind::Thread)
+        {
+            browser.move_vertical(/*delta*/ 1);
+        }
+        let entry_started = Instant::now();
+        browser.enter_selected();
+        entry_samples.push(entry_started.elapsed());
     }
-    expansion_samples.sort_unstable();
-    collapse_samples.sort_unstable();
-    let expansion_p95 = percentile_95(&expansion_samples);
-    let collapse_p95 = percentile_95(&collapse_samples);
+    entry_samples.sort_unstable();
+    return_samples.sort_unstable();
+    let entry_p95 = percentile_95(&entry_samples);
+    let return_p95 = percentile_95(&return_samples);
     eprintln!(
-        "trace-profile nodes=100000 build_ms={:.3} first_expand_ms={:.3} navigation_p95_ms={:.3} expansion_p95_ms={:.3} collapse_p95_ms={:.3}",
+        "trace-profile nodes=100000 build_ms={:.3} first_entry_ms={:.3} navigation_p95_ms={:.3} entry_p95_ms={:.3} return_p95_ms={:.3}",
         duration_ms(build_elapsed),
-        duration_ms(expand_elapsed),
+        duration_ms(entry_elapsed),
         duration_ms(navigation_p95),
-        duration_ms(expansion_p95),
-        duration_ms(collapse_p95),
+        duration_ms(entry_p95),
+        duration_ms(return_p95),
     );
     assert!(
-        navigation_p95 < Duration::from_millis(50),
+        navigation_p95 < Duration::from_millis(/*millis*/ 50),
         "warm navigation p95 was {navigation_p95:?}"
     );
     assert!(
-        expansion_p95 < Duration::from_millis(50),
-        "warm expansion p95 was {expansion_p95:?}"
+        entry_p95 < Duration::from_millis(/*millis*/ 50),
+        "warm level entry p95 was {entry_p95:?}"
+    );
+    assert!(
+        return_p95 < Duration::from_millis(/*millis*/ 50),
+        "warm level return p95 was {return_p95:?}"
     );
 }
 
@@ -352,6 +575,18 @@ fn render_app(app: &mut App, width: u16, height: u16) -> String {
     let backend = TestBackend::new(width, height);
     let mut terminal = Terminal::new(backend).unwrap();
     terminal.draw(|frame| render::render(frame, app)).unwrap();
+    let mut redraw = false;
+    if let Some(job) = app.take_detail_render_job() {
+        app.install_detail_render(job.run());
+        redraw = true;
+    }
+    if let Some(job) = app.take_search_job() {
+        app.install_search(job.run());
+        redraw = true;
+    }
+    if redraw {
+        terminal.draw(|frame| render::render(frame, app)).unwrap();
+    }
     let buffer = terminal.backend().buffer();
     (0..height)
         .map(|y| {
@@ -376,6 +611,29 @@ fn selected_id(app: &App) -> String {
         panic!("expected browser");
     };
     browser.selected_node().unwrap().locator.id.clone()
+}
+
+fn complete_search(app: &mut App) {
+    let job = app.take_search_job().expect("expected search job");
+    app.install_search(job.run());
+}
+
+fn move_to_kind(app: &mut App, kind: TraceNodeKind) {
+    let Screen::Browser(browser) = &mut app.screen else {
+        panic!("expected browser");
+    };
+    for index in 0..browser.row_count() {
+        if browser
+            .rows_window(index, 1)
+            .first()
+            .is_some_and(|node| node.locator.kind == kind)
+        {
+            browser.first();
+            browser.move_vertical(isize::try_from(index).unwrap());
+            return;
+        }
+    }
+    panic!("expected {kind:?} row");
 }
 
 fn write_rollout(

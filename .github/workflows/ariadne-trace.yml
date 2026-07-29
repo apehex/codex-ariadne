@@ -9,6 +9,9 @@ on:
       - "codex-rs/cli/**"
       - "codex-rs/trace/**"
       - "codex-rs/trace-tui/**"
+      - "codex-rs/tui/Cargo.toml"
+      - "codex-rs/tui/src/lib.rs"
+      - "codex-rs/tui/src/trace_visual_renderer*.rs"
       - "codex-rs/rollout-trace/**"
       - "codex-rs/Cargo.lock"
       - "codex-rs/Cargo.toml"
@@ -21,6 +24,9 @@ on:
       - "codex-rs/cli/**"
       - "codex-rs/trace/**"
       - "codex-rs/trace-tui/**"
+      - "codex-rs/tui/Cargo.toml"
+      - "codex-rs/tui/src/lib.rs"
+      - "codex-rs/tui/src/trace_visual_renderer*.rs"
       - "codex-rs/rollout-trace/**"
       - "codex-rs/Cargo.lock"
       - "codex-rs/Cargo.toml"
@@ -61,6 +67,18 @@ jobs:
       - name: Test trace model and TUI
         working-directory: codex-rs
         run: cargo test --locked -p codex-trace -p codex-trace-tui
+
+      - name: Test parent TUI trace renderer
+        working-directory: codex-rs
+        run: cargo test --locked -p codex-tui --lib trace_visual_renderer
+
+      - name: Profile 100k-node single-level navigation
+        if: runner.os == 'Linux'
+        working-directory: codex-rs
+        run: >-
+          cargo test --locked -p codex-trace-tui
+          profile_hundred_thousand_node_navigation
+          -- --ignored --nocapture
 
       - name: Test CLI trace integration
         working-directory: codex-rs

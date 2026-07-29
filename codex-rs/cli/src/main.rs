@@ -1452,7 +1452,13 @@ async fn cli_main(
                 root_remote_auth_token_env.as_deref(),
                 "trace",
             )?;
-            codex_trace_tui::run(trace_cli, find_codex_home()?.into_path_buf()).await?;
+            codex_trace_tui::run_with_renderer(
+                trace_cli,
+                find_codex_home()?.into_path_buf(),
+                codex_trace_tui::TraceViewOptions::default(),
+                std::sync::Arc::new(codex_tui::CodexTraceVisualRenderer::new()),
+            )
+            .await?;
         }
         Some(Subcommand::Cloud(mut cloud_cli)) => {
             reject_remote_mode_for_subcommand(

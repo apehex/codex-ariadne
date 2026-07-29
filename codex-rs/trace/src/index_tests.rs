@@ -97,6 +97,7 @@ fn node(locator: TraceNodeLocator, parent: Option<TraceNodeLocator>) -> TraceNod
         evidence: EvidenceGrade::Semantic,
         timestamp: None,
         label: "node".to_string(),
+        presentation: Default::default(),
         detail: json!({}),
     }
 }

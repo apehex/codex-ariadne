@@ -178,6 +178,8 @@ mod status_indicator_widget;
 mod streaming;
 mod style;
 mod terminal_hyperlinks;
+mod trace_visual_renderer;
+pub use trace_visual_renderer::CodexTraceVisualRenderer;
 mod terminal_palette;
 mod terminal_probe;
 mod terminal_title;

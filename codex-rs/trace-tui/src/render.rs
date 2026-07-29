@@ -1,5 +1,7 @@
 use codex_trace::EvidenceGrade;
+use codex_trace::TraceNode;
 use codex_trace::TraceNodeKind;
+use codex_trace::TraceRecordClass;
 use codex_trace::TraceSourceKind;
 use codex_trace::TraceStatus;
 use ratatui::Frame;
@@ -8,7 +10,6 @@ use ratatui::layout::Layout;
 use ratatui::layout::Rect;
 use ratatui::style::Stylize;
 use ratatui::text::Line;
-use ratatui::text::Text;
 use ratatui::widgets::Block;
 use ratatui::widgets::Borders;
 use ratatui::widgets::Clear;
@@ -17,17 +18,20 @@ use ratatui::widgets::ListItem;
 use ratatui::widgets::ListState;
 use ratatui::widgets::Paragraph;
 use ratatui::widgets::Wrap;
+use unicode_width::UnicodeWidthChar;
+use unicode_width::UnicodeWidthStr;
 
+use crate::ContentMode;
+use crate::HeaderMode;
+use crate::PreviewMode;
+use crate::TraceColumn;
+use crate::TraceRowStyleRequest;
 use crate::app::App;
 use crate::app::PickerState;
 use crate::app::Screen;
-use crate::app::pane_name;
 use crate::app::picker_matches;
-use crate::browser::BrowserPane;
 use crate::browser::BrowserState;
-
-const WIDE_MIN: u16 = 120;
-const MEDIUM_MIN: u16 = 78;
+use crate::browser::SearchScope;
 
 pub(crate) fn render(frame: &mut Frame<'_>, app: &mut App) {
     let [header, body, footer] = Layout::vertical([
@@ -44,12 +48,12 @@ pub(crate) fn render(frame: &mut Frame<'_>, app: &mut App) {
         ..
     } = app;
     match screen {
-        Screen::Loading(message) => render_centered_message(frame, body, message, "Loading"),
+        Screen::Loading(message) => render_message(frame, body, message, "Loading"),
         Screen::Picker(picker) => {
             render_picker(frame, body, catalog.as_ref(), notice.as_deref(), picker)
         }
         Screen::Browser(browser) => render_browser(frame, body, browser),
-        Screen::Error(message) => render_centered_message(frame, body, message, "Trace error"),
+        Screen::Error(message) => render_message(frame, body, message, "Trace error"),
     }
     render_footer(frame, footer, app);
 }
@@ -61,13 +65,15 @@ fn render_header(frame: &mut Frame<'_>, area: Rect, app: &App) {
         Screen::Browser(browser) => browser.breadcrumb().join(" / "),
         Screen::Error(_) => "error".to_string(),
     };
-    let line = vec![
-        " Codex Trace ".bold().cyan(),
-        " read-only · offline ".dim(),
-        "│ ".dim(),
-        sanitize_display(&subtitle).into(),
-    ];
-    frame.render_widget(Paragraph::new(Line::from(line)), area);
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            " Codex Trace ".bold().cyan(),
+            " read-only · offline ".dim(),
+            "│ ".dim(),
+            sanitize(&subtitle).into(),
+        ])),
+        area,
+    );
 }
 
 fn render_picker(
@@ -78,66 +84,57 @@ fn render_picker(
     picker: &PickerState,
 ) {
     let Some(catalog) = catalog else {
-        render_centered_message(frame, area, "catalog unavailable", "Root sessions");
+        render_message(frame, area, "catalog unavailable", "Root sessions");
         return;
     };
-    let mut lines = Vec::new();
+    let mut items = Vec::new();
     if let Some(notice) = notice {
-        lines.push(ListItem::new(Line::from(vec![
-            "! ".cyan(),
-            sanitize_display(notice).cyan(),
-        ])));
+        items.push(ListItem::new(format!("! {}", sanitize(notice)).cyan()));
     }
     if !catalog.diagnostics.is_empty() {
-        lines.push(ListItem::new(
+        items.push(ListItem::new(
             format!("{} catalog diagnostic(s)", catalog.diagnostics.len()).cyan(),
         ));
         for diagnostic in catalog.diagnostics.iter().take(3) {
-            lines.push(ListItem::new(Line::from(vec![
+            items.push(ListItem::new(Line::from(vec![
                 "  ! ".cyan(),
                 format!("[{}] ", evidence_name(diagnostic.evidence)).dim(),
-                sanitize_display(&diagnostic.message).into(),
+                sanitize(&diagnostic.message).into(),
             ])));
         }
         if catalog.diagnostics.len() > 3 {
-            lines.push(ListItem::new(
+            items.push(ListItem::new(
                 format!("  … {} more", catalog.diagnostics.len() - 3).dim(),
             ));
         }
     }
-    if catalog.sessions.is_empty() {
-        lines.push(ListItem::new("No local trace sessions were found."));
-    }
     if let Some(query) = &picker.search {
-        lines.push(ListItem::new(Line::from(vec![
-            "/ ".cyan(),
-            sanitize_display(query).into(),
-        ])));
+        items.push(ListItem::new(format!("/ {}", sanitize(query)).cyan()));
     }
     for index in picker_matches(Some(catalog), picker.search.as_deref()) {
         let session = &catalog.sessions[index];
         let created = session.created_at.as_deref().unwrap_or("time unavailable");
-        let cwd = session.cwd.as_ref().map_or_else(
-            || "cwd unavailable".to_string(),
-            |path| path.display().to_string(),
-        );
         let model = session
             .model_provider
             .as_deref()
             .unwrap_or("model unavailable");
-        let archived = if session.archived { " archived" } else { "" };
         let thread_count = session.thread_count.map_or_else(
             || "? threads".to_string(),
             |count| format!("{count:>3} threads"),
         );
-        lines.push(ListItem::new(Line::from(vec![
-            format!("{created:<24} ").dim(),
-            format!("{:<8} ", source_name(session.source)).cyan(),
-            format!("{:<9} ", status_name(session.status)).into(),
-            format!("{thread_count}  ").dim(),
-            format!("{model}{archived}  ").dim(),
-            sanitize_display(&cwd).into(),
-        ])));
+        let cwd = session.cwd.as_ref().map_or_else(
+            || "cwd unavailable".to_string(),
+            |path| path.display().to_string(),
+        );
+        items.push(ListItem::new(format!(
+            "{created:<24} {:<8} {:<9} {thread_count}  {model:<18} {}",
+            source_name(session.source),
+            status_name(session.status),
+            sanitize(&cwd)
+        )));
+    }
+    if items.is_empty() {
+        items.push(ListItem::new("No local trace sessions were found."));
     }
     let diagnostic_rows = if catalog.diagnostics.is_empty() {
         0
@@ -149,129 +146,225 @@ fn render_picker(
         + diagnostic_rows
         + usize::from(picker.search.is_some());
     let mut state = ListState::default().with_selected(Some(selected));
-    let list = List::new(lines)
-        .block(
-            Block::default()
-                .title(" Root sessions ")
-                .borders(Borders::ALL),
-        )
-        .highlight_symbol("▶ ")
-        .highlight_style(ratatui::style::Style::new().bold());
-    frame.render_stateful_widget(list, area, &mut state);
+    frame.render_stateful_widget(
+        List::new(items)
+            .block(
+                Block::default()
+                    .title(" Root sessions ")
+                    .borders(Borders::ALL),
+            )
+            .highlight_symbol("▶ ")
+            .highlight_style(ratatui::style::Style::new().bold()),
+        area,
+        &mut state,
+    );
 }
 
 fn render_browser(frame: &mut Frame<'_>, area: Rect, browser: &mut BrowserState) {
-    if area.width >= WIDE_MIN {
-        let [tree, children, inspector] = Layout::horizontal([
-            Constraint::Percentage(34),
-            Constraint::Percentage(27),
-            Constraint::Percentage(39),
-        ])
-        .areas(area);
-        render_tree(frame, tree, browser);
-        render_children(frame, children, browser);
-        render_inspector(frame, inspector, browser);
-    } else if area.width >= MEDIUM_MIN {
-        let [tree, content] =
-            Layout::horizontal([Constraint::Percentage(44), Constraint::Percentage(56)])
-                .areas(area);
-        render_tree(frame, tree, browser);
-        if browser.pane == BrowserPane::Children {
-            render_children(frame, content, browser);
-        } else {
-            render_inspector(frame, content, browser);
-        }
+    if browser.detail_open {
+        render_detail(frame, area, browser);
     } else {
-        match browser.pane {
-            BrowserPane::Tree => render_tree(frame, area, browser),
-            BrowserPane::Children => render_children(frame, area, browser),
-            BrowserPane::Inspector => render_inspector(frame, area, browser),
-        }
+        render_level(frame, area, browser);
     }
-    if browser.search.is_some() {
+    if browser.help_open {
+        render_help(frame, centered(area, 72, 72));
+    } else if browser.search.is_some() {
         render_search(frame, centered(area, 78, 70), browser);
-    } else if browser.diagnostics_open {
-        render_diagnostics(frame, centered(area, 82, 70), browser);
+    } else if browser.filter_open {
+        render_filter(frame, centered(area, 52, 75), browser);
     }
 }
 
-fn render_tree(frame: &mut Frame<'_>, area: Rect, browser: &BrowserState) {
-    let capacity = area.height.saturating_sub(2).max(1) as usize;
+fn render_level(frame: &mut Frame<'_>, area: Rect, browser: &mut BrowserState) {
+    let show_headers = match browser.options().headers {
+        HeaderMode::Always => true,
+        HeaderMode::Never => false,
+        HeaderMode::Auto => area.width >= 78 && area.height >= 6,
+    };
+    let inner_width = usize::from(area.width.saturating_sub(2).max(1));
+    let columns = visible_columns(browser, inner_width);
+    browser.omitted_columns = browser
+        .options()
+        .columns
+        .len()
+        .saturating_sub(columns.len());
+    let header_rows = usize::from(show_headers);
+    let capacity = usize::from(area.height.saturating_sub(2))
+        .saturating_sub(header_rows)
+        .max(1);
+    browser.page_size = capacity;
     let range = viewport(
-        browser.visible_row_count(),
+        browser.row_count(),
         browser.selected_index(),
         capacity,
+        browser.viewport,
     );
-    let rows = browser.visible_rows_window(range.start, range.len());
-    let items = rows
-        .iter()
-        .map(|row| {
-            let disclosure = match (row.has_children, row.expanded) {
-                (true, true) => "▾",
-                (true, false) => "▸",
-                (false, _) => "·",
-            };
-            ListItem::new(Line::from(vec![
-                "  ".repeat(row.depth).into(),
-                format!("{disclosure} ").dim(),
-                format!("{:<4} ", kind_tag(row.node.locator.kind)).magenta(),
-                sanitize_display(&row.node.label).into(),
-            ]))
-        })
-        .collect::<Vec<_>>();
-    let mut state = ListState::default()
-        .with_selected(Some(browser.selected_index().saturating_sub(range.start)));
-    let list = List::new(items)
-        .block(pane_block("Thread tree", browser.pane == BrowserPane::Tree))
-        .highlight_symbol("▶ ")
-        .highlight_style(ratatui::style::Style::new().bold());
-    frame.render_stateful_widget(list, area, &mut state);
-}
-
-fn render_children(frame: &mut Frame<'_>, area: Rect, browser: &BrowserState) {
-    let capacity = area.height.saturating_sub(2).max(1) as usize;
-    let range = viewport(browser.child_count(), browser.child_index, capacity);
-    let children = browser.children_window(range.start, range.len());
-    let items = if children.is_empty() {
-        vec![ListItem::new("No child nodes")]
-    } else {
-        children
-            .iter()
-            .map(|node| {
-                ListItem::new(Line::from(vec![
-                    format!("{:<4} ", kind_tag(node.locator.kind)).magenta(),
-                    sanitize_display(&node.label).into(),
-                ]))
-            })
-            .collect()
-    };
-    let selected =
-        (!children.is_empty()).then_some(browser.child_index.saturating_sub(range.start));
+    browser.viewport = range.start;
+    let rows = browser.rows_window(range.start, range.len());
+    let mut items = Vec::with_capacity(rows.len() + header_rows);
+    if show_headers {
+        items.push(
+            ListItem::new(format_row(
+                /*selected*/ false,
+                "NAME",
+                &columns,
+                /*node*/ None,
+                Some("PREVIEW"),
+                browser.options().preview,
+                inner_width,
+            ))
+            .style(ratatui::style::Style::new().bold().dim()),
+        );
+    }
+    for (offset, node) in rows.iter().enumerate() {
+        let selected = range.start + offset == browser.selected_index();
+        let line = format_row(
+            selected,
+            &sanitize(&node.label),
+            &columns,
+            Some(node),
+            node.presentation.preview.as_deref(),
+            browser.options().preview,
+            inner_width,
+        );
+        let style = browser.renderer().row_style(TraceRowStyleRequest {
+            class: node.presentation.class,
+            status: node.presentation.status,
+            evidence: node.evidence,
+            selected,
+        });
+        items.push(ListItem::new(line).style(style));
+    }
+    if rows.is_empty() {
+        items.push(ListItem::new("No visible child records".dim()));
+    }
+    let selected = (!rows.is_empty())
+        .then_some(browser.selected_index().saturating_sub(range.start) + header_rows);
     let mut state = ListState::default().with_selected(selected);
-    let list = List::new(items)
-        .block(pane_block(
-            "Ordered children",
-            browser.pane == BrowserPane::Children,
-        ))
-        .highlight_symbol("▶ ")
-        .highlight_style(ratatui::style::Style::new().bold());
-    frame.render_stateful_widget(list, area, &mut state);
+    frame.render_stateful_widget(
+        List::new(items)
+            .block(Block::default().title(" Records ").borders(Borders::ALL))
+            .highlight_style(ratatui::style::Style::new().bold()),
+        area,
+        &mut state,
+    );
 }
 
-fn render_inspector(frame: &mut Frame<'_>, area: Rect, browser: &mut BrowserState) {
-    let inner_width = area.width.saturating_sub(2).max(1) as usize;
-    let inner_height = area.height.saturating_sub(2).max(1) as usize;
-    let lines = browser
-        .prepare_inspector(inner_width, inner_height)
+fn visible_columns(browser: &BrowserState, width: usize) -> Vec<TraceColumn> {
+    let mut columns = browser.options().columns.clone();
+    let drop_order = [
+        TraceColumn::Identifier,
+        TraceColumn::Timestamp,
+        TraceColumn::Status,
+        TraceColumn::Evidence,
+        TraceColumn::Source,
+        TraceColumn::Kind,
+        TraceColumn::Class,
+    ];
+    for candidate in drop_order {
+        let required = 14
+            + columns
+                .iter()
+                .map(|column| column_width(*column) + 1)
+                .sum::<usize>();
+        if required <= width {
+            break;
+        }
+        if let Some(index) = columns.iter().position(|column| *column == candidate) {
+            columns.remove(index);
+        }
+    }
+    columns
+}
+
+fn format_row(
+    selected: bool,
+    label: &str,
+    columns: &[TraceColumn],
+    node: Option<&TraceNode>,
+    preview: Option<&str>,
+    preview_mode: PreviewMode,
+    width: usize,
+) -> Line<'static> {
+    let fixed = columns
         .iter()
-        .cloned()
-        .map(Line::from)
+        .map(|column| column_width(*column) + 1)
+        .sum::<usize>();
+    let marker = if selected { "▶ " } else { "  " };
+    let allow_preview = match preview_mode {
+        PreviewMode::Auto => width.saturating_sub(fixed + 26) >= 32,
+        PreviewMode::Always => width.saturating_sub(fixed + 18) >= 12,
+        PreviewMode::Never => false,
+    };
+    let preview_width = allow_preview.then_some(width.saturating_sub(fixed + 26));
+    let name_width = width
+        .saturating_sub(fixed + preview_width.unwrap_or_default() + 2)
+        .max(8);
+    let mut text = format!("{marker}{}", pad_fit(label, name_width.saturating_sub(2)));
+    for column in columns {
+        let value = node
+            .map(|node| column_value(*column, node))
+            .unwrap_or_else(|| column_name(*column).to_string());
+        text.push(' ');
+        text.push_str(&pad_fit(&value, column_width(*column)));
+    }
+    if let Some(preview_width) = preview_width {
+        text.push(' ');
+        text.push_str(&fit(&sanitize(preview.unwrap_or_default()), preview_width));
+    }
+    Line::from(text)
+}
+
+fn render_detail(frame: &mut Frame<'_>, area: Rect, browser: &mut BrowserState) {
+    let Some(node) = browser.selected_node().cloned() else {
+        render_message(frame, area, "No selected record", "Detail");
+        return;
+    };
+    let metadata = vec![
+        format!("kind: {}", kind_name(node.locator.kind)),
+        format!("class: {}", class_name(node.presentation.class)),
+        format!(
+            "status: {}",
+            node.presentation.status.map_or("—", status_name)
+        ),
+        format!("timestamp: {}", node.timestamp.as_deref().unwrap_or("—")),
+        format!("source: {}", source_name(node.provenance)),
+        format!("evidence: {}", evidence_name(node.evidence)),
+        format!("id: {}", sanitize(&node.locator.id)),
+    ];
+    let mode = mode_name(browser.content_mode);
+    let inner_width = usize::from(area.width.saturating_sub(4).max(1));
+    let inner_height = usize::from(area.height.saturating_sub(2).max(1));
+    browser.detail_page_size = inner_height;
+    let content = browser.detail_lines(inner_width).to_vec();
+    let mut lines = metadata.into_iter().map(Line::from).collect::<Vec<_>>();
+    if let Some(notice) = browser.payload_notice() {
+        lines.push(Line::from(format!("raw: {}", sanitize(notice))).red());
+    }
+    if browser.detail_truncated() {
+        lines.push(Line::from("content truncated at the safe display bound").magenta());
+    }
+    lines.push(Line::from(""));
+    if content.is_empty() {
+        lines.push(Line::from("preparing content…").dim());
+    } else {
+        lines.extend(content.iter().cloned());
+    }
+    let max_scroll = lines.len().saturating_sub(inner_height);
+    browser.detail_scroll = browser.detail_scroll.min(max_scroll);
+    let visible = lines
+        .into_iter()
+        .skip(browser.detail_scroll)
+        .take(inner_height)
         .collect::<Vec<_>>();
-    let inspector = Paragraph::new(Text::from(lines)).block(pane_block(
-        "Inspector",
-        browser.pane == BrowserPane::Inspector,
-    ));
-    frame.render_widget(inspector, area);
+    frame.render_widget(
+        Paragraph::new(visible).block(
+            Block::default()
+                .title(format!(" Detail · {mode} · v change view "))
+                .borders(Borders::ALL),
+        ),
+        area,
+    );
 }
 
 fn render_search(frame: &mut Frame<'_>, area: Rect, browser: &BrowserState) {
@@ -279,42 +372,47 @@ fn render_search(frame: &mut Frame<'_>, area: Rect, browser: &BrowserState) {
         return;
     };
     frame.render_widget(Clear, area);
+    let scope = match search.scope {
+        SearchScope::Visible => "visible",
+        SearchScope::All => "all records",
+    };
     let [input, results] =
         Layout::vertical([Constraint::Length(3), Constraint::Min(2)]).areas(area);
     frame.render_widget(
-        Paragraph::new(format!("/{}", sanitize_display(&search.query))).block(
+        Paragraph::new(format!("/{}", sanitize(&search.query))).block(
             Block::default()
-                .title(" Search this tree ")
+                .title(format!(" Search {scope} "))
                 .borders(Borders::ALL),
         ),
         input,
     );
-    let capacity = results.height.saturating_sub(2).max(1) as usize;
-    let range = viewport(search.hits.len(), search.selected, capacity);
-    let items = if search.hits.is_empty() {
-        vec![ListItem::new("Press Enter to search")]
+    let items = if search.loading {
+        vec![ListItem::new("Searching…".cyan())]
+    } else if search.hits.is_empty() {
+        let message = if search.completed_query.is_some() {
+            "No matches"
+        } else {
+            "Press Enter to search"
+        };
+        vec![ListItem::new(message)]
     } else {
         search
             .hits
             .iter()
-            .skip(range.start)
-            .take(range.len())
             .map(|hit| {
-                ListItem::new(Line::from(vec![
-                    format!("{:<4} ", kind_tag(hit.locator.kind)).magenta(),
-                    format!(
-                        "[{} {}] ",
-                        source_name(hit.provenance),
-                        evidence_name(hit.evidence)
-                    )
-                    .dim(),
-                    format!("{}: {}", hit.field, sanitize_display(&hit.snippet)).into(),
-                ]))
+                ListItem::new(format!(
+                    "{:<4} [{} {}] {}: {}",
+                    kind_tag(hit.locator.kind),
+                    source_name(hit.provenance),
+                    evidence_name(hit.evidence),
+                    hit.field,
+                    sanitize(&hit.snippet)
+                ))
             })
             .collect()
     };
-    let selected = (!search.hits.is_empty()).then_some(search.selected.saturating_sub(range.start));
-    let mut state = ListState::default().with_selected(selected);
+    let mut state =
+        ListState::default().with_selected((!search.hits.is_empty()).then_some(search.selected));
     frame.render_stateful_widget(
         List::new(items)
             .block(Block::default().title(" Results ").borders(Borders::ALL))
@@ -324,39 +422,25 @@ fn render_search(frame: &mut Frame<'_>, area: Rect, browser: &BrowserState) {
     );
 }
 
-fn render_diagnostics(frame: &mut Frame<'_>, area: Rect, browser: &BrowserState) {
+fn render_filter(frame: &mut Frame<'_>, area: Rect, browser: &BrowserState) {
     frame.render_widget(Clear, area);
-    let diagnostics = browser.diagnostics();
-    let capacity = area.height.saturating_sub(2).max(1) as usize;
-    let range = viewport(diagnostics.len(), browser.diagnostic_index, capacity);
-    let items = if diagnostics.is_empty() {
-        vec![ListItem::new("No diagnostics recorded for this session.")]
-    } else {
-        diagnostics
-            .iter()
-            .skip(range.start)
-            .take(range.len())
-            .map(|diagnostic| {
-                let path = diagnostic
-                    .path
-                    .as_ref()
-                    .map_or_else(String::new, |path| format!(" · {}", path.display()));
-                ListItem::new(sanitize_display(&format!(
-                    "[{}] {}{path}",
-                    evidence_name(diagnostic.evidence),
-                    diagnostic.message,
-                )))
-            })
-            .collect()
-    };
-    let selected =
-        (!diagnostics.is_empty()).then_some(browser.diagnostic_index.saturating_sub(range.start));
-    let mut state = ListState::default().with_selected(selected);
+    let items = BrowserState::filter_classes()
+        .iter()
+        .map(|class| {
+            let checked = if browser.class_visible(*class) {
+                "x"
+            } else {
+                " "
+            };
+            ListItem::new(format!("[{checked}] {}", class_name(*class)))
+        })
+        .collect::<Vec<_>>();
+    let mut state = ListState::default().with_selected(Some(browser.filter_index));
     frame.render_stateful_widget(
         List::new(items)
             .block(
                 Block::default()
-                    .title(" Diagnostics · d/Esc close ")
+                    .title(" Filter · Space toggle · Enter apply ")
                     .borders(Borders::ALL),
             )
             .highlight_symbol("▶ "),
@@ -365,18 +449,27 @@ fn render_diagnostics(frame: &mut Frame<'_>, area: Rect, browser: &BrowserState)
     );
 }
 
-fn render_centered_message(frame: &mut Frame<'_>, area: Rect, message: &str, title: &str) {
+fn render_help(frame: &mut Frame<'_>, area: Rect) {
+    frame.render_widget(Clear, area);
     frame.render_widget(
-        Paragraph::new(Text::from(wrapped_lines(
-            &sanitize_display(message),
-            area.width.saturating_sub(4).max(1) as usize,
-        )))
+        Paragraph::new(vec![
+            Line::from("j/k, arrows     move"),
+            Line::from("PgUp/PgDn       page"),
+            Line::from("Ctrl-U/Ctrl-D   half-page"),
+            Line::from("gg / G          first / last"),
+            Line::from("Enter           descend or open leaf"),
+            Line::from("i / Esc         inspect / return"),
+            Line::from("/ / g/          visible / all-record search"),
+            Line::from("n / N           next / previous result"),
+            Line::from("f / F           edit / reset filters"),
+            Line::from("v               rendered / text / raw"),
+            Line::from("? / q           help / quit"),
+        ])
         .block(
             Block::default()
-                .title(format!(" {title} "))
+                .title(" Trace navigation ")
                 .borders(Borders::ALL),
-        )
-        .wrap(Wrap { trim: false }),
+        ),
         area,
     );
 }
@@ -384,20 +477,30 @@ fn render_centered_message(frame: &mut Frame<'_>, area: Rect, message: &str, tit
 fn render_footer(frame: &mut Frame<'_>, area: Rect, app: &App) {
     let help = match &app.screen {
         Screen::Loading(_) => " Esc cancel  q quit ",
-        Screen::Picker(picker) => {
-            if picker.search.is_some() {
-                " type to filter  ↑↓ select  Enter open  Esc close search "
-            } else {
-                " ↑↓/jk select  / filter  Enter open  q quit "
-            }
+        Screen::Picker(picker) if picker.search.is_some() => {
+            " type to filter  ↑↓ select  Enter open  Esc close search "
+        }
+        Screen::Picker(_) => " ↑↓/jk select  / filter  Enter open  q quit ",
+        Screen::Browser(browser) if browser.help_open => " ?/Esc close help  q quit ",
+        Screen::Browser(browser) if browser.search.is_some() => {
+            " type query  Enter search/open  ↑↓ choose  Esc close  q quit "
+        }
+        Screen::Browser(browser) if browser.filter_open => {
+            " Space toggle  ↑↓ choose  Enter/Esc close  r reset  q quit "
+        }
+        Screen::Browser(browser) if browser.detail_open => {
+            " jk scroll  PgUp/PgDn page  v rendered/text/raw  Esc back  q quit "
         }
         Screen::Browser(browser) => {
-            let pane = pane_name(browser.pane);
             return frame.render_widget(
                 Paragraph::new(format!(
-                    " {pane}  Tab pane  jk move  h/Backspace parent  Enter open/raw  / search  n/N hits  d diagnostics  q quit "
+                    " {}/{} visible · {} hidden · {} columns omitted  jk move  Enter descend  i detail  Esc parent  / search  f filter  ? help  q quit ",
+                    browser.row_count(),
+                    browser.row_count() + browser.hidden_count(),
+                    browser.hidden_count(),
+                    browser.omitted_columns,
                 ))
-                .style(ratatui::style::Style::new().dim()),
+                .dim(),
                 area,
             );
         }
@@ -406,40 +509,91 @@ fn render_footer(frame: &mut Frame<'_>, area: Rect, app: &App) {
     frame.render_widget(Paragraph::new(help).dim(), area);
 }
 
-fn pane_block(title: &str, active: bool) -> Block<'_> {
-    let marker = if active { "●" } else { " " };
-    let block = Block::default()
-        .title(format!(" {marker} {title} "))
-        .borders(Borders::ALL);
-    if active {
-        block.border_style(ratatui::style::Style::new().cyan())
-    } else {
-        block
+fn render_message(frame: &mut Frame<'_>, area: Rect, message: &str, title: &str) {
+    frame.render_widget(
+        Paragraph::new(sanitize(message))
+            .block(
+                Block::default()
+                    .title(format!(" {title} "))
+                    .borders(Borders::ALL),
+            )
+            .wrap(Wrap { trim: false }),
+        area,
+    );
+}
+
+fn column_name(column: TraceColumn) -> &'static str {
+    match column {
+        TraceColumn::Kind => "KIND",
+        TraceColumn::Class => "CLASS",
+        TraceColumn::Status => "STATUS",
+        TraceColumn::Timestamp => "TIME",
+        TraceColumn::Source => "SOURCE",
+        TraceColumn::Evidence => "EVIDENCE",
+        TraceColumn::Identifier => "ID",
     }
 }
 
-fn wrapped_lines(text: &str, width: usize) -> Vec<Line<'static>> {
-    let width = width.max(1);
-    let mut lines = Vec::new();
-    for source_line in sanitize_display(text).lines() {
-        for wrapped in textwrap::wrap(source_line, width) {
-            lines.push(Line::from(wrapped.into_owned()));
-        }
-        if source_line.is_empty() {
-            lines.push(Line::from(""));
-        }
+fn column_width(column: TraceColumn) -> usize {
+    match column {
+        TraceColumn::Kind => 4,
+        TraceColumn::Class => 12,
+        TraceColumn::Status => 9,
+        TraceColumn::Timestamp => 20,
+        TraceColumn::Source => 8,
+        TraceColumn::Evidence => 13,
+        TraceColumn::Identifier => 16,
     }
-    if lines.is_empty() {
-        lines.push(Line::from(""));
-    }
-    lines
 }
 
-fn sanitize_display(text: &str) -> String {
+fn column_value(column: TraceColumn, node: &TraceNode) -> String {
+    match column {
+        TraceColumn::Kind => kind_tag(node.locator.kind).to_string(),
+        TraceColumn::Class => class_name(node.presentation.class).to_string(),
+        TraceColumn::Status => node
+            .presentation
+            .status
+            .map_or_else(|| "—".to_string(), |status| status_name(status).to_string()),
+        TraceColumn::Timestamp => node.timestamp.clone().unwrap_or_else(|| "—".to_string()),
+        TraceColumn::Source => source_name(node.provenance).to_string(),
+        TraceColumn::Evidence => evidence_name(node.evidence).to_string(),
+        TraceColumn::Identifier => node.locator.id.clone(),
+    }
+}
+
+fn fit(text: &str, width: usize) -> String {
+    if UnicodeWidthStr::width(text) <= width {
+        return text.to_string();
+    }
+    if width <= 1 {
+        return "…".chars().take(width).collect();
+    }
+    let target = width - 1;
+    let mut used = 0;
+    let mut fitted = String::new();
+    for character in text.chars() {
+        let character_width = character.width().unwrap_or_default();
+        if used + character_width > target {
+            break;
+        }
+        fitted.push(character);
+        used += character_width;
+    }
+    fitted.push('…');
+    fitted
+}
+
+fn pad_fit(text: &str, width: usize) -> String {
+    let mut fitted = fit(text, width);
+    fitted.push_str(&" ".repeat(width.saturating_sub(UnicodeWidthStr::width(fitted.as_str()))));
+    fitted
+}
+
+fn sanitize(text: &str) -> String {
     text.chars()
-        .map(|ch| {
-            if matches!(ch, '\n' | '\t') || !ch.is_control() {
-                ch
+        .map(|character| {
+            if matches!(character, '\n' | '\t') || !character.is_control() {
+                character
             } else {
                 '�'
             }
@@ -462,6 +616,58 @@ fn centered(area: Rect, max_width: u16, percent_height: u16) -> Rect {
         width,
         height,
     )
+}
+
+fn viewport(
+    total: usize,
+    selected: usize,
+    capacity: usize,
+    current_start: usize,
+) -> std::ops::Range<usize> {
+    if total == 0 {
+        return 0..0;
+    }
+    let capacity = capacity.max(1).min(total);
+    let selected = selected.min(total - 1);
+    let maximum_start = total.saturating_sub(capacity);
+    let current_start = current_start.min(maximum_start);
+    let start = if selected < current_start {
+        selected
+    } else if selected >= current_start + capacity {
+        selected + 1 - capacity
+    } else {
+        current_start
+    };
+    start..start + capacity
+}
+
+fn mode_name(mode: ContentMode) -> &'static str {
+    match mode {
+        ContentMode::Rendered => "rendered",
+        ContentMode::Text => "text",
+        ContentMode::Raw => "raw",
+    }
+}
+
+fn class_name(class: TraceRecordClass) -> &'static str {
+    match class {
+        TraceRecordClass::Structure => "structure",
+        TraceRecordClass::System => "system",
+        TraceRecordClass::Developer => "developer",
+        TraceRecordClass::User => "user",
+        TraceRecordClass::Assistant => "assistant",
+        TraceRecordClass::Commentary => "commentary",
+        TraceRecordClass::FinalAnswer => "final",
+        TraceRecordClass::Reasoning => "reasoning",
+        TraceRecordClass::ToolInput => "tool input",
+        TraceRecordClass::ToolOutput => "tool output",
+        TraceRecordClass::Code => "code",
+        TraceRecordClass::Delegation => "delegation",
+        TraceRecordClass::Compaction => "compaction",
+        TraceRecordClass::Diagnostic => "diagnostic",
+        TraceRecordClass::RawArtifact => "raw",
+        TraceRecordClass::Other => "other",
+    }
 }
 
 fn source_name(source: TraceSourceKind) -> &'static str {
@@ -492,6 +698,26 @@ fn evidence_name(evidence: EvidenceGrade) -> &'static str {
     }
 }
 
+fn kind_name(kind: TraceNodeKind) -> &'static str {
+    match kind {
+        TraceNodeKind::Session => "session",
+        TraceNodeKind::Thread => "thread",
+        TraceNodeKind::Turn => "turn",
+        TraceNodeKind::Inference => "inference",
+        TraceNodeKind::ConversationItem => "conversation item",
+        TraceNodeKind::ToolCall => "tool call",
+        TraceNodeKind::CodeCell => "code cell",
+        TraceNodeKind::TerminalSession => "terminal session",
+        TraceNodeKind::TerminalOperation => "terminal operation",
+        TraceNodeKind::Compaction => "compaction",
+        TraceNodeKind::CompactionRequest => "compaction request",
+        TraceNodeKind::InteractionEdge => "interaction edge",
+        TraceNodeKind::RawPayload => "raw payload",
+        TraceNodeKind::RolloutRecord => "rollout record",
+        TraceNodeKind::Diagnostic => "diagnostic",
+    }
+}
+
 fn kind_tag(kind: TraceNodeKind) -> &'static str {
     match kind {
         TraceNodeKind::Session => "SES",
@@ -510,16 +736,4 @@ fn kind_tag(kind: TraceNodeKind) -> &'static str {
         TraceNodeKind::RolloutRecord => "REC",
         TraceNodeKind::Diagnostic => "DIA",
     }
-}
-
-fn viewport(total: usize, selected: usize, capacity: usize) -> std::ops::Range<usize> {
-    if total == 0 {
-        return 0..0;
-    }
-    let capacity = capacity.max(1).min(total);
-    let selected = selected.min(total - 1);
-    let start = selected
-        .saturating_sub(capacity / 2)
-        .min(total.saturating_sub(capacity));
-    start..start + capacity
 }

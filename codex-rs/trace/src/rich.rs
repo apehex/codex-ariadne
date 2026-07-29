@@ -282,6 +282,8 @@ fn insert<T: Serialize>(
     if nodes.len() >= max_nodes && !nodes.contains_key(&locator) {
         return Ok(false);
     }
+    let detail = serde_json::to_value(value)?;
+    let presentation = crate::TraceRecordPresentation::from_detail(locator.kind, &detail);
     nodes.insert(
         locator.clone(),
         TraceNode {
@@ -291,7 +293,8 @@ fn insert<T: Serialize>(
             evidence,
             timestamp,
             label,
-            detail: serde_json::to_value(value)?,
+            presentation,
+            detail,
         },
     );
     Ok(true)

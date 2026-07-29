@@ -115,3 +115,7 @@ Close the plan after recording the implementation diff, exact validation command
 ## Current state and residual gates
 
 The local engineering acceptance criteria are satisfied. The plan remains open because the candidate is not yet committed or pushed, the configured Linux/macOS/Windows workflow has not run on the candidate commit, and no public tag or release artifact exists. Repository About metadata and default-branch decisions also remain research-operator actions. No push, tag, release, GitHub setting change, or external publication was performed.
+
+## Successor UI plan
+
+The accepted `.ariadne/plans/open/2026-07-28-single-panel-trace-browser.md` supersedes this plan's three-pane, flattened-tree, fold/expand, and expansion/collapse performance requirements. The implementation receipt above remains historical evidence; correctness, privacy, offline/read-only, compatibility, CI, and public-prototype gates remain active.

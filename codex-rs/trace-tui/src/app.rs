@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use codex_trace::PayloadReadLimit;
 use codex_trace::RawPayloadHandle;
 use codex_trace::SanitizedPayload;
@@ -8,17 +10,27 @@ use codex_trace::TraceSourceKind;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyEventKind;
+use crossterm::event::KeyModifiers;
 
-use crate::browser::BrowserPane;
+#[cfg(test)]
+use crate::PlainTraceVisualRenderer;
+use crate::TraceViewOptions;
+use crate::TraceVisualRenderer;
 use crate::browser::BrowserState;
+use crate::browser::SearchScope;
+use crate::jobs::DetailRenderJob;
+use crate::jobs::DetailRenderResult;
+use crate::jobs::SearchJob;
+use crate::jobs::SearchResult;
 
-#[derive(Debug)]
 pub(crate) struct App {
     pub(crate) screen: Screen,
     pub(crate) catalog: Option<TraceCatalog>,
     preferred_session: Option<String>,
     auto_open_rich: bool,
     pub(crate) notice: Option<String>,
+    options: TraceViewOptions,
+    renderer: Arc<dyn TraceVisualRenderer>,
 }
 
 #[derive(Debug)]
@@ -49,13 +61,30 @@ pub(crate) enum AppAction {
 }
 
 impl App {
+    #[cfg(test)]
     pub(crate) fn loading(preferred_session: Option<String>, auto_open_rich: bool) -> Self {
+        Self::loading_with_visuals(
+            preferred_session,
+            auto_open_rich,
+            TraceViewOptions::default(),
+            Arc::new(PlainTraceVisualRenderer),
+        )
+    }
+
+    pub(crate) fn loading_with_visuals(
+        preferred_session: Option<String>,
+        auto_open_rich: bool,
+        options: TraceViewOptions,
+        renderer: Arc<dyn TraceVisualRenderer>,
+    ) -> Self {
         Self {
             screen: Screen::Loading("discovering local traces".to_string()),
             catalog: None,
             preferred_session,
             auto_open_rich,
             notice: None,
+            options,
+            renderer,
         }
     }
 
@@ -105,14 +134,48 @@ impl App {
         self.screen = Screen::Browser(Box::new(browser));
     }
 
+    pub(crate) fn browser_visuals(&self) -> (TraceViewOptions, Arc<dyn TraceVisualRenderer>) {
+        (self.options.clone(), Arc::clone(&self.renderer))
+    }
+
     #[cfg(test)]
     pub(crate) fn install_session(&mut self, trace: SessionTrace) {
-        self.install_browser(BrowserState::new(trace));
+        self.install_browser(BrowserState::with_visuals(
+            trace,
+            self.options.clone(),
+            Arc::clone(&self.renderer),
+        ));
     }
 
     pub(crate) fn install_payload(&mut self, id: String, result: anyhow::Result<SanitizedPayload>) {
         if let Screen::Browser(browser) = &mut self.screen {
             browser.install_payload(id, result);
+        }
+    }
+
+    pub(crate) fn take_detail_render_job(&mut self) -> Option<DetailRenderJob> {
+        match &mut self.screen {
+            Screen::Browser(browser) => browser.take_detail_render_job(),
+            Screen::Loading(_) | Screen::Picker(_) | Screen::Error(_) => None,
+        }
+    }
+
+    pub(crate) fn install_detail_render(&mut self, result: DetailRenderResult) {
+        if let Screen::Browser(browser) = &mut self.screen {
+            browser.install_detail_render(result);
+        }
+    }
+
+    pub(crate) fn take_search_job(&mut self) -> Option<SearchJob> {
+        match &mut self.screen {
+            Screen::Browser(browser) => browser.take_search_job(),
+            Screen::Loading(_) | Screen::Picker(_) | Screen::Error(_) => None,
+        }
+    }
+
+    pub(crate) fn install_search(&mut self, result: SearchResult) {
+        if let Screen::Browser(browser) = &mut self.screen {
+            browser.install_search(result);
         }
     }
 
@@ -233,7 +296,13 @@ impl App {
                     _ => AppAction::None,
                 }
             }
-            Screen::Browser(browser) => handle_browser_key(browser, key),
+            Screen::Browser(browser) => {
+                let (action, return_to_picker) = handle_browser_key(browser, key);
+                if return_to_picker {
+                    self.screen = Screen::Picker(PickerState::default());
+                }
+                action
+            }
             Screen::Error(_) => match key.code {
                 KeyCode::Char('q') | KeyCode::Esc | KeyCode::Enter => AppAction::Quit,
                 _ => AppAction::None,
@@ -242,29 +311,22 @@ impl App {
     }
 }
 
-fn handle_browser_key(browser: &mut BrowserState, key: KeyEvent) -> AppAction {
-    if browser.diagnostics_open {
-        return match key.code {
-            KeyCode::Esc | KeyCode::Char('d') => {
-                browser.diagnostics_open = false;
-                AppAction::None
-            }
-            KeyCode::Down | KeyCode::Char('j') => {
-                browser.move_diagnostic(1);
-                AppAction::None
-            }
-            KeyCode::Up | KeyCode::Char('k') => {
-                browser.move_diagnostic(-1);
-                AppAction::None
-            }
+fn handle_browser_key(browser: &mut BrowserState, key: KeyEvent) -> (AppAction, bool) {
+    if browser.help_open {
+        let action = match key.code {
             KeyCode::Char('q') => AppAction::Quit,
+            KeyCode::Esc | KeyCode::Char('?') | KeyCode::Enter => {
+                browser.help_open = false;
+                AppAction::None
+            }
             _ => AppAction::None,
         };
+        return (action, false);
     }
     if browser.search.is_some() {
-        return match key.code {
+        let action = match key.code {
             KeyCode::Esc => {
-                browser.search = None;
+                browser.cancel_search();
                 AppAction::None
             }
             KeyCode::Enter => {
@@ -276,11 +338,11 @@ fn handle_browser_key(browser: &mut BrowserState, key: KeyEvent) -> AppAction {
                 AppAction::None
             }
             KeyCode::Down => {
-                browser.move_search(1);
+                browser.move_search(/*delta*/ 1);
                 AppAction::None
             }
             KeyCode::Up => {
-                browser.move_search(-1);
+                browser.move_search(/*delta*/ -1);
                 AppAction::None
             }
             KeyCode::Char(ch) => {
@@ -289,38 +351,161 @@ fn handle_browser_key(browser: &mut BrowserState, key: KeyEvent) -> AppAction {
             }
             _ => AppAction::None,
         };
+        return (action, false);
     }
-    match key.code {
+    if browser.filter_open {
+        let action = match key.code {
+            KeyCode::Esc => {
+                browser.filter_open = false;
+                AppAction::None
+            }
+            KeyCode::Enter => {
+                browser.apply_filter();
+                AppAction::None
+            }
+            KeyCode::Char(' ') => {
+                browser.toggle_filter_class();
+                AppAction::None
+            }
+            KeyCode::Char('r') => {
+                browser.reset_filter();
+                AppAction::None
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                browser.move_filter(/*delta*/ 1);
+                AppAction::None
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                browser.move_filter(/*delta*/ -1);
+                AppAction::None
+            }
+            KeyCode::Char('q') => AppAction::Quit,
+            _ => AppAction::None,
+        };
+        return (action, false);
+    }
+    if browser.detail_open {
+        let action = match key.code {
+            KeyCode::Char('q') => AppAction::Quit,
+            KeyCode::Esc | KeyCode::Backspace => {
+                browser.back();
+                AppAction::None
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                browser.scroll_detail(/*delta*/ 1);
+                AppAction::None
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                browser.scroll_detail(/*delta*/ -1);
+                AppAction::None
+            }
+            KeyCode::PageDown => {
+                browser
+                    .scroll_detail(isize::try_from(browser.detail_page_size).unwrap_or(isize::MAX));
+                AppAction::None
+            }
+            KeyCode::PageUp => {
+                browser.scroll_detail(
+                    -isize::try_from(browser.detail_page_size).unwrap_or(isize::MAX),
+                );
+                AppAction::None
+            }
+            KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                browser.scroll_detail(
+                    isize::try_from(browser.detail_page_size.div_ceil(2)).unwrap_or(isize::MAX),
+                );
+                AppAction::None
+            }
+            KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                browser.scroll_detail(
+                    -isize::try_from(browser.detail_page_size.div_ceil(2)).unwrap_or(isize::MAX),
+                );
+                AppAction::None
+            }
+            KeyCode::Char('v') => {
+                browser.cycle_content_mode();
+                if browser.selected_is_raw_payload()
+                    && browser.content_mode == crate::ContentMode::Raw
+                {
+                    return (read_selected_payload(browser), false);
+                }
+                AppAction::None
+            }
+            KeyCode::Char('r') => read_selected_payload(browser),
+            KeyCode::Char('?') => {
+                browser.help_open = true;
+                AppAction::None
+            }
+            _ => AppAction::None,
+        };
+        return (action, false);
+    }
+
+    if browser.pending_g {
+        browser.pending_g = false;
+        let action = match key.code {
+            KeyCode::Char('g') => {
+                browser.first();
+                AppAction::None
+            }
+            KeyCode::Char('/') => {
+                browser.begin_search(SearchScope::All);
+                AppAction::None
+            }
+            _ => AppAction::None,
+        };
+        return (action, false);
+    }
+
+    let action = match key.code {
         KeyCode::Char('q') => AppAction::Quit,
-        KeyCode::Esc => {
-            browser.pane = BrowserPane::Tree;
+        KeyCode::Esc | KeyCode::Backspace => {
+            if !browser.back() {
+                return (AppAction::None, true);
+            }
             AppAction::None
         }
         KeyCode::Char('/') => {
-            browser.begin_search();
+            browser.begin_search(SearchScope::Visible);
             AppAction::None
         }
-        KeyCode::Char('d') => {
-            browser.diagnostics_open = true;
+        KeyCode::Char('f') => {
+            browser.filter_open = true;
             AppAction::None
         }
-        KeyCode::Tab => {
-            browser.pane = browser.pane.next();
+        KeyCode::Char('F') => {
+            browser.reset_filter();
             AppAction::None
         }
-        KeyCode::BackTab => {
-            browser.pane = browser.pane.previous();
+        KeyCode::Char('?') => {
+            browser.help_open = true;
             AppAction::None
         }
         KeyCode::Down | KeyCode::Char('j') => {
-            browser.move_vertical(1);
+            browser.move_vertical(/*delta*/ 1);
             AppAction::None
         }
         KeyCode::Up | KeyCode::Char('k') => {
-            browser.move_vertical(-1);
+            browser.move_vertical(/*delta*/ -1);
             AppAction::None
         }
-        KeyCode::Home | KeyCode::Char('g') => {
+        KeyCode::PageDown => {
+            browser.page(/*delta*/ 1, browser.page_size);
+            AppAction::None
+        }
+        KeyCode::PageUp => {
+            browser.page(/*delta*/ -1, browser.page_size);
+            AppAction::None
+        }
+        KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            browser.page(/*delta*/ 1, browser.page_size.div_ceil(2));
+            AppAction::None
+        }
+        KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            browser.page(/*delta*/ -1, browser.page_size.div_ceil(2));
+            AppAction::None
+        }
+        KeyCode::Home => {
             browser.first();
             AppAction::None
         }
@@ -328,37 +513,33 @@ fn handle_browser_key(browser: &mut BrowserState, key: KeyEvent) -> AppAction {
             browser.last();
             AppAction::None
         }
-        KeyCode::Right | KeyCode::Char('l') => {
-            browser.expand();
-            AppAction::None
-        }
-        KeyCode::Left | KeyCode::Char('h') => {
-            browser.collapse_or_parent();
-            AppAction::None
-        }
-        KeyCode::Backspace => {
-            browser.collapse_or_parent();
+        KeyCode::Char('g') => {
+            browser.pending_g = true;
             AppAction::None
         }
         KeyCode::Enter => {
-            if browser.selected_is_raw_payload() {
-                read_selected_payload(browser)
-            } else {
-                browser.expand_or_enter();
-                AppAction::None
+            browser.enter_selected();
+            if browser.detail_open && browser.selected_is_raw_payload() {
+                return (read_selected_payload(browser), false);
             }
+            AppAction::None
+        }
+        KeyCode::Char('i') => {
+            browser.open_detail();
+            AppAction::None
         }
         KeyCode::Char('n') => {
-            browser.jump_search(1);
+            browser.jump_search(/*delta*/ 1);
             AppAction::None
         }
         KeyCode::Char('N') => {
-            browser.jump_search(-1);
+            browser.jump_search(/*delta*/ -1);
             AppAction::None
         }
         KeyCode::Char('r') => read_selected_payload(browser),
         _ => AppAction::None,
-    }
+    };
+    (action, false)
 }
 
 fn read_selected_payload(browser: &mut BrowserState) -> AppAction {
@@ -395,12 +576,4 @@ pub(crate) fn picker_matches(catalog: Option<&TraceCatalog>, query: Option<&str>
             .map(|(index, _)| index)
             .collect()
     })
-}
-
-pub(crate) fn pane_name(pane: BrowserPane) -> &'static str {
-    match pane {
-        BrowserPane::Tree => "tree",
-        BrowserPane::Children => "children",
-        BrowserPane::Inspector => "inspector",
-    }
 }

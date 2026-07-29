@@ -1,6 +1,6 @@
 ---
 source: trace-tui/src/render_tests.rs
-expression: "render_app(&picker, 100, 18)"
+expression: "render_app(&mut picker, 100, 18)"
 ---
  Codex Trace  read-only · offline │ root sessions
 
@@ -8,7 +8,7 @@ expression: "render_app(&picker, 100, 18)"
 │  1 catalog diagnostic(s)                                                                         │
 │    ! [unavailable] cannot read rollout metadata: rollout at /synthetic/sessions/2026/07/25/rollou│
 │  / synthetic                                                                                     │
-│▶ 2026-07-25T00:00:00Z     ordinary unknown     2 threads  synthetic  /synthetic/workspace        │
+│▶ 2026-07-25T00:00:00Z     ordinary unknown     2 threads  synthetic          /synthetic/workspace│
 │                                                                                                  │
 │                                                                                                  │
 │                                                                                                  │

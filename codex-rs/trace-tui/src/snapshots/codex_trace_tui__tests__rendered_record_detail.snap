@@ -2,19 +2,19 @@
 source: trace-tui/src/render_tests.rs
 expression: "render_app(&mut app, 100, 24)"
 ---
- Codex Trace  read-only · offline │ session rollout-ui
+ Codex Trace  read-only · offline │ session 019d0000-0000-7000-8000-000000000101 / thread 019d0000-0
 
-┌ Records ─────────────────────────────────────────────────────────────────────────────────────────┐
-│  NAME                   KIND CLASS        STATUS    TIME                 SOURCE   EVIDENCE       │
-│  thread /root           THR  structure    running   2026-07-28T00:00:00Z rich     semantic       │
-│▶ payload SessionMetada… RAW  raw          —         —                    rich     exact          │
+┌ Detail · rendered · v change view ───────────────────────────────────────────────────────────────┐
+│kind: rollout record                                                                              │
+│class: user                                                                                       │
+│status: —                                                                                         │
+│timestamp: 2026-07-25T00:00:01Z                                                                   │
+│source: ordinary                                                                                  │
+│evidence: semantic                                                                                │
+│id: ordinary:019d0000-0000-7000-8000-000000000101:2                                               │
 │                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
+│first line                                                                                        │
+│second line with **markdown**                                                                     │
 │                                                                                                  │
 │                                                                                                  │
 │                                                                                                  │
@@ -25,4 +25,4 @@ expression: "render_app(&mut app, 100, 24)"
 │                                                                                                  │
 │                                                                                                  │
 └──────────────────────────────────────────────────────────────────────────────────────────────────┘
- 2/2 visible · 0 hidden · 0 columns omitted  jk move  Enter descend  i detail  Esc parent  / search
+ jk scroll  PgUp/PgDn page  v rendered/text/raw  Esc back  q quit

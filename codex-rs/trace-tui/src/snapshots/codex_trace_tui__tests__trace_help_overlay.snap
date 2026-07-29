@@ -1,0 +1,28 @@
+---
+source: trace-tui/src/render_tests.rs
+expression: "render_app(&mut app, 100, 24)"
+---
+ Codex Trace  read-only · offline │ session 019d0000-0000-7000-8000-000000000101 / thread 019d0000-0
+
+┌ Records ─────────────────────────────────────────────────────────────────────────────────────────┐
+│  NAME                   KIND CLASS        STATUS    TIME                 SOURCE   EVIDENCE       │
+│  session metadata       REC  structure    —         2026-07-25T00:00:00Z ordinary semantic       │
+│▶ event      ┌ Trace navigation ────────────────────────────────────────────────────┐mantic       │
+│             │j/k, arrows     move                                                  │             │
+│             │PgUp/PgDn       page                                                  │             │
+│             │Ctrl-U/Ctrl-D   half-page                                             │             │
+│             │gg / G          first / last                                          │             │
+│             │Enter           descend or open leaf                                  │             │
+│             │i / Esc         inspect / return                                      │             │
+│             │/ / g/          visible / all-record search                           │             │
+│             │n / N           next / previous result                                │             │
+│             │f / F           edit / reset filters                                  │             │
+│             │v               rendered / text / raw                                 │             │
+│             │? / q           help / quit                                           │             │
+│             │                                                                      │             │
+│             │                                                                      │             │
+│             └──────────────────────────────────────────────────────────────────────┘             │
+│                                                                                                  │
+│                                                                                                  │
+└──────────────────────────────────────────────────────────────────────────────────────────────────┘
+ ?/Esc close help  q quit

@@ -2,27 +2,27 @@
 source: trace-tui/src/render_tests.rs
 expression: rendered
 ---
- Codex Trace  read-only · offline │ session rollout-ui / payload SessionMetadata
+ Codex Trace  read-only · offline │ session rollout-ui
 
-┌ ● Thread tree ───────────────────────────┐┌   Inspector ─────────────────────────────────────────┐
-│  ▾ SES  session rollout-ui               ││Raw payload — payload SessionMetadata                 │
-│▶   · RAW  payload SessionMetadata        ││id: raw_payload:1                                     │
-│    · THR  thread /root                   ││timestamp: unavailable                                │
-│                                          ││evidence: rich · exact                                │
-│                                          ││                                                      │
-│                                          ││{                                                     │
-│                                          ││  "kind": {                                           │
-│                                          ││    "type": "session_metadata"                        │
-│                                          ││  },                                                  │
-│                                          ││  "path": "payloads/1.json",                          │
-│                                          ││  "raw_payload_id": "raw_payload:1"                   │
-│                                          ││}                                                     │
-│                                          ││                                                      │
-│                                          ││Raw payload unavailable: bad �[31m payload� path      │
-│                                          ││                                                      │
-│                                          ││                                                      │
-│                                          ││                                                      │
-│                                          ││                                                      │
-│                                          ││                                                      │
-└──────────────────────────────────────────┘└──────────────────────────────────────────────────────┘
- tree  Tab pane  jk move  h/Backspace parent  Enter open/raw  / search  n/N hits  d diagnostics  q q
+┌ Detail · raw · v change view ────────────────────────────────────────────────────────────────────┐
+│kind: raw payload                                                                                 │
+│class: raw                                                                                        │
+│status: —                                                                                         │
+│timestamp: —                                                                                      │
+│source: rich                                                                                      │
+│evidence: exact                                                                                   │
+│id: raw_payload:1                                                                                 │
+│raw: bad �[31m payload� path                                                                      │
+│                                                                                                  │
+│semantic normalized JSON — not an exact source artifact                                           │
+│                                                                                                  │
+│{                                                                                                 │
+│  "kind": {                                                                                       │
+│    "type": "session_metadata"                                                                    │
+│  },                                                                                              │
+│  "path": "payloads/1.json",                                                                      │
+│  "raw_payload_id": "raw_payload:1"                                                               │
+│}                                                                                                 │
+│                                                                                                  │
+└──────────────────────────────────────────────────────────────────────────────────────────────────┘
+ jk scroll  PgUp/PgDn page  v rendered/text/raw  Esc back  q quit

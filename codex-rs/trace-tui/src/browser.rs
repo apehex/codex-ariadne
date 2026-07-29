@@ -1,274 +1,195 @@
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
-use std::collections::HashMap;
-use std::collections::HashSet;
-use std::io::Write;
+use std::sync::Arc;
 
+use anyhow::Result;
 use codex_trace::RawPayloadHandle;
 use codex_trace::SanitizedPayload;
 use codex_trace::SearchHit;
 use codex_trace::SessionTrace;
-use codex_trace::TraceDiagnostic;
 use codex_trace::TraceIndex;
 use codex_trace::TraceNode;
 use codex_trace::TraceNodeKind;
 use codex_trace::TraceNodeLocator;
+use codex_trace::TraceRecordClass;
+use ratatui::text::Line;
 
-const STRUCTURED_DETAIL_LIMIT: usize = 64 * 1024;
+use crate::ContentMode;
+#[cfg(test)]
+use crate::PlainTraceVisualRenderer;
+use crate::TraceViewOptions;
+use crate::TraceVisualRenderer;
+use crate::jobs::DetailRenderJob;
+use crate::jobs::DetailRenderKey;
+use crate::jobs::DetailRenderResult;
+use crate::jobs::SearchJob;
+use crate::jobs::SearchResult;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum BrowserPane {
-    Tree,
-    Children,
-    Inspector,
-}
-
-impl BrowserPane {
-    pub(crate) fn next(self) -> Self {
-        match self {
-            Self::Tree => Self::Children,
-            Self::Children => Self::Inspector,
-            Self::Inspector => Self::Tree,
-        }
-    }
-
-    pub(crate) fn previous(self) -> Self {
-        match self {
-            Self::Tree => Self::Inspector,
-            Self::Children => Self::Tree,
-            Self::Inspector => Self::Children,
-        }
-    }
-}
-
-#[derive(Debug)]
-pub(crate) struct BrowserState {
-    trace: SessionTrace,
-    index: TraceIndex,
-    ordered_roots: Vec<usize>,
-    ordered_children: HashMap<TraceNodeLocator, Vec<usize>>,
-    has_children: Vec<bool>,
-    expanded: BTreeSet<TraceNodeLocator>,
-    selected: TraceNodeLocator,
-    selected_row: usize,
-    visible: Vec<VisibleRow>,
-    selected_children: Vec<usize>,
-    pub(crate) pane: BrowserPane,
-    pub(crate) child_index: usize,
-    pub(crate) inspector_scroll: usize,
-    pub(crate) search: Option<SearchState>,
-    last_search: Option<SearchState>,
-    pub(crate) diagnostics_open: bool,
-    pub(crate) diagnostic_index: usize,
-    payloads: BTreeMap<String, PayloadState>,
-    payload_generation: u64,
-    inspector: Option<InspectorCache>,
+#[derive(Debug, Clone)]
+struct NavigationFrame {
+    container: Option<TraceNodeLocator>,
+    selected: Option<TraceNodeLocator>,
+    viewport: usize,
 }
 
 #[derive(Debug)]
 enum PayloadState {
     Loading,
-    Loaded(SanitizedPayload),
+    Loaded(Arc<SanitizedPayload>),
     Failed(String),
 }
 
+/// Set of records considered by a submitted semantic search.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SearchScope {
+    Visible,
+    All,
+}
+
+/// Editable search overlay state and the most recently completed result set.
 #[derive(Debug)]
 pub(crate) struct SearchState {
     pub(crate) query: String,
     pub(crate) hits: Vec<SearchHit>,
     pub(crate) selected: usize,
+    pub(crate) scope: SearchScope,
+    pub(crate) loading: bool,
+    pub(crate) completed_query: Option<String>,
 }
 
-#[derive(Debug, Clone)]
-pub(crate) struct TreeRow<'a> {
-    pub(crate) node: &'a TraceNode,
-    pub(crate) depth: usize,
-    pub(crate) has_children: bool,
-    pub(crate) expanded: bool,
+struct DetailCache {
+    key: DetailRenderKey,
+    truncated: bool,
+    lines: Vec<Line<'static>>,
 }
 
-#[derive(Debug, Clone)]
-struct VisibleRow {
-    position: usize,
-    depth: usize,
-    has_children: bool,
-    expanded: bool,
+struct PendingDetail {
+    key: DetailRenderKey,
+    generation: u64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct InspectorKey {
-    locator: TraceNodeLocator,
-    width: usize,
+/// Locator-based state for one single-depth trace list or full-screen record.
+pub(crate) struct BrowserState {
+    trace: Arc<SessionTrace>,
+    index: Arc<TraceIndex>,
+    container: Option<TraceNodeLocator>,
+    stack: Vec<NavigationFrame>,
+    rows: Vec<usize>,
+    hidden_rows: usize,
+    selected: usize,
+    pub(crate) viewport: usize,
+    pub(crate) page_size: usize,
+    pub(crate) detail_open: bool,
+    pub(crate) detail_scroll: usize,
+    pub(crate) detail_page_size: usize,
+    pub(crate) content_mode: ContentMode,
+    pub(crate) search: Option<SearchState>,
+    last_search: Option<SearchState>,
+    search_generation: u64,
+    pending_search_generation: Option<u64>,
+    queued_search_job: Option<SearchJob>,
+    pub(crate) filter_open: bool,
+    pub(crate) filter_index: usize,
+    pub(crate) help_open: bool,
+    pub(crate) omitted_columns: usize,
+    visible_classes: BTreeSet<TraceRecordClass>,
+    temporary_reveal: Option<TraceNodeLocator>,
+    pub(crate) pending_g: bool,
+    payloads: BTreeMap<String, PayloadState>,
     payload_generation: u64,
+    detail_cache: Option<DetailCache>,
+    pending_detail: Option<PendingDetail>,
+    queued_detail_job: Option<DetailRenderJob>,
+    detail_generation: u64,
+    renderer: Arc<dyn TraceVisualRenderer>,
+    options: TraceViewOptions,
 }
 
-#[derive(Debug)]
-struct InspectorCache {
-    key: InspectorKey,
-    prefix: Vec<String>,
-    payload_id: Option<String>,
-    window_start: usize,
-    window_height: usize,
-    window: Vec<String>,
+impl std::fmt::Debug for BrowserState {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("BrowserState")
+            .field("container", &self.container)
+            .field("rows", &self.rows.len())
+            .field("selected", &self.selected)
+            .field("detail_open", &self.detail_open)
+            .field("content_mode", &self.content_mode)
+            .finish()
+    }
 }
 
 impl BrowserState {
+    #[cfg(test)]
     pub(crate) fn new(trace: SessionTrace) -> Self {
-        let index = TraceIndex::new(&trace);
-        let (ordered_roots, ordered_children, has_children) = ordered_structure(&trace);
-        let selected = ordered_roots
-            .first()
-            .and_then(|position| trace.nodes.get(*position))
-            .or_else(|| trace.nodes.first())
-            .map(|node| node.locator.clone())
-            .unwrap_or_else(|| {
-                TraceNodeLocator::new(
-                    &trace.summary.session_id,
-                    TraceNodeKind::Session,
-                    &trace.summary.session_id,
-                )
-            });
-        let mut expanded = BTreeSet::new();
-        expanded.insert(selected.clone());
+        Self::with_visuals(
+            trace,
+            TraceViewOptions::default(),
+            Arc::new(PlainTraceVisualRenderer),
+        )
+    }
+
+    pub(crate) fn with_visuals(
+        trace: SessionTrace,
+        options: TraceViewOptions,
+        renderer: Arc<dyn TraceVisualRenderer>,
+    ) -> Self {
+        let index = Arc::new(TraceIndex::new(&trace));
+        let trace = Arc::new(trace);
+        let container = index
+            .root_nodes(&trace)
+            .find(|node| node.locator.kind == TraceNodeKind::Session)
+            .or_else(|| index.root_nodes(&trace).next())
+            .map(|node| node.locator.clone());
         let mut state = Self {
             trace,
             index,
-            ordered_roots,
-            ordered_children,
-            has_children,
-            expanded,
-            selected,
-            selected_row: 0,
-            visible: Vec::new(),
-            selected_children: Vec::new(),
-            pane: BrowserPane::Tree,
-            child_index: 0,
-            inspector_scroll: 0,
+            container,
+            stack: Vec::new(),
+            rows: Vec::new(),
+            hidden_rows: 0,
+            selected: 0,
+            viewport: 0,
+            page_size: 20,
+            detail_open: false,
+            detail_scroll: 0,
+            detail_page_size: 20,
+            content_mode: ContentMode::Rendered,
             search: None,
             last_search: None,
-            diagnostics_open: false,
-            diagnostic_index: 0,
+            search_generation: 0,
+            pending_search_generation: None,
+            queued_search_job: None,
+            filter_open: false,
+            filter_index: 0,
+            help_open: false,
+            omitted_columns: 0,
+            visible_classes: TraceRecordClass::ALL.into_iter().collect(),
+            temporary_reveal: None,
+            pending_g: false,
             payloads: BTreeMap::new(),
             payload_generation: 0,
-            inspector: None,
+            detail_cache: None,
+            pending_detail: None,
+            queued_detail_job: None,
+            detail_generation: 0,
+            renderer,
+            options,
         };
-        state.rebuild_visible();
-        state.rebuild_selected_children();
+        state.rebuild_rows(/*preferred*/ None);
         state
     }
 
-    #[cfg(test)]
-    pub(crate) fn visible_rows(&self) -> Vec<TreeRow<'_>> {
-        self.tree_rows(0, self.visible.len())
+    pub(crate) fn options(&self) -> &TraceViewOptions {
+        &self.options
     }
 
-    pub(crate) fn visible_row_count(&self) -> usize {
-        self.visible.len()
-    }
-
-    pub(crate) fn visible_rows_window(&self, start: usize, len: usize) -> Vec<TreeRow<'_>> {
-        self.tree_rows(start, len)
-    }
-
-    fn tree_rows(&self, start: usize, len: usize) -> Vec<TreeRow<'_>> {
-        self.visible
-            .iter()
-            .skip(start)
-            .take(len)
-            .filter_map(|row| {
-                self.trace.nodes.get(row.position).map(|node| TreeRow {
-                    node,
-                    depth: row.depth,
-                    has_children: row.has_children,
-                    expanded: row.expanded,
-                })
-            })
-            .collect()
-    }
-
-    fn rebuild_visible(&mut self) {
-        let mut visible = Vec::with_capacity(self.visible.len().max(16));
-        let mut visited = HashSet::new();
-        let mut pending = self
-            .ordered_roots
-            .iter()
-            .copied()
-            .rev()
-            .map(|position| (position, 0usize))
-            .collect::<Vec<_>>();
-        while let Some((position, depth)) = pending.pop() {
-            if !visited.insert(position) {
-                continue;
-            }
-            let Some(node) = self.trace.nodes.get(position) else {
-                continue;
-            };
-            let children = self.ordered_children.get(&node.locator);
-            let has_children = children.is_some_and(|children| !children.is_empty());
-            let expanded = self.expanded.contains(&node.locator);
-            visible.push(VisibleRow {
-                position,
-                depth,
-                has_children,
-                expanded,
-            });
-            if expanded {
-                let child_depth = depth.saturating_add(1);
-                if let Some(children) = children {
-                    pending.extend(children.iter().rev().map(|child| (*child, child_depth)));
-                }
-            }
-        }
-        self.visible = visible;
-        self.selected_row = self
-            .visible
-            .iter()
-            .position(|row| {
-                self.trace
-                    .nodes
-                    .get(row.position)
-                    .is_some_and(|node| node.locator == self.selected)
-            })
-            .unwrap_or(0);
-    }
-
-    fn rebuild_selected_children(&mut self) {
-        self.selected_children = self
-            .ordered_children
-            .get(&self.selected)
-            .cloned()
-            .unwrap_or_default();
-        self.child_index = self
-            .child_index
-            .min(self.selected_children.len().saturating_sub(1));
-    }
-
-    fn select(&mut self, locator: TraceNodeLocator, visible_index: Option<usize>) {
-        self.selected = locator;
-        self.selected_row = visible_index.unwrap_or_else(|| {
-            self.visible
-                .iter()
-                .position(|row| {
-                    self.trace
-                        .nodes
-                        .get(row.position)
-                        .is_some_and(|node| node.locator == self.selected)
-                })
-                .unwrap_or(0)
-        });
-        self.child_index = 0;
-        self.inspector_scroll = 0;
-        self.inspector = None;
-        self.rebuild_selected_children();
-    }
-
-    pub(crate) fn selected_node(&self) -> Option<&TraceNode> {
-        self.index.node(&self.trace, &self.selected)
+    pub(crate) fn renderer(&self) -> &dyn TraceVisualRenderer {
+        self.renderer.as_ref()
     }
 
     pub(crate) fn breadcrumb(&self) -> Vec<&str> {
         let mut labels = Vec::new();
-        let mut current = Some(&self.selected);
+        let mut current = self.container.as_ref();
         let mut visited = BTreeSet::new();
         while let Some(locator) = current {
             if !visited.insert(locator.clone()) {
@@ -284,16 +205,16 @@ impl BrowserState {
         labels
     }
 
+    pub(crate) fn row_count(&self) -> usize {
+        self.rows.len()
+    }
+
     pub(crate) fn selected_index(&self) -> usize {
-        self.selected_row
+        self.selected
     }
 
-    pub(crate) fn child_count(&self) -> usize {
-        self.selected_children.len()
-    }
-
-    pub(crate) fn children_window(&self, start: usize, len: usize) -> Vec<&TraceNode> {
-        self.selected_children
+    pub(crate) fn rows_window(&self, start: usize, len: usize) -> Vec<&TraceNode> {
+        self.rows
             .iter()
             .skip(start)
             .take(len)
@@ -301,263 +222,228 @@ impl BrowserState {
             .collect()
     }
 
+    pub(crate) fn selected_node(&self) -> Option<&TraceNode> {
+        self.rows
+            .get(self.selected)
+            .and_then(|position| self.trace.nodes.get(*position))
+    }
+
     pub(crate) fn move_vertical(&mut self, delta: isize) {
-        match self.pane {
-            BrowserPane::Tree => {
-                if self.visible.is_empty() {
-                    return;
-                }
-                let next = move_index(self.selected_row, delta, self.visible.len());
-                if let Some(locator) = self
-                    .trace
-                    .nodes
-                    .get(self.visible[next].position)
-                    .map(|node| node.locator.clone())
-                {
-                    self.select(locator, Some(next));
-                }
-            }
-            BrowserPane::Children => {
-                self.child_index =
-                    move_index(self.child_index, delta, self.selected_children.len());
-            }
-            BrowserPane::Inspector => {
-                self.inspector_scroll = move_index(self.inspector_scroll, delta, usize::MAX);
-            }
-        }
+        self.selected = move_index(self.selected, delta, self.rows.len());
+        self.finish_list_move();
+    }
+
+    pub(crate) fn page(&mut self, delta: isize, page_size: usize) {
+        let amount = isize::try_from(page_size.max(1)).unwrap_or(isize::MAX);
+        self.move_vertical(delta.saturating_mul(amount));
     }
 
     pub(crate) fn first(&mut self) {
-        match self.pane {
-            BrowserPane::Tree => {
-                if let Some(locator) = self
-                    .visible
-                    .first()
-                    .and_then(|row| self.trace.nodes.get(row.position))
-                    .map(|node| node.locator.clone())
-                {
-                    self.select(locator, Some(0));
-                }
-            }
-            BrowserPane::Children => self.child_index = 0,
-            BrowserPane::Inspector => self.inspector_scroll = 0,
-        }
+        self.selected = 0;
+        self.finish_list_move();
     }
 
     pub(crate) fn last(&mut self) {
-        match self.pane {
-            BrowserPane::Tree => {
-                if let Some((index, locator)) = self
-                    .visible
-                    .iter()
-                    .enumerate()
-                    .next_back()
-                    .and_then(|(index, row)| {
-                        self.trace
-                            .nodes
-                            .get(row.position)
-                            .map(|node| (index, node.locator.clone()))
-                    })
-                {
-                    self.select(locator, Some(index));
-                }
-            }
-            BrowserPane::Children => {
-                self.child_index = self.selected_children.len().saturating_sub(1);
-            }
-            BrowserPane::Inspector => {}
-        }
+        self.selected = self.rows.len().saturating_sub(1);
+        self.finish_list_move();
     }
 
-    pub(crate) fn expand_or_enter(&mut self) {
-        match self.pane {
-            BrowserPane::Tree => {
-                if self.expanded.contains(&self.selected) {
-                    self.collapse_selected();
-                } else {
-                    self.expand_selected();
-                }
-            }
-            BrowserPane::Children => {
-                if let Some(locator) = self
-                    .selected_children
-                    .get(self.child_index)
-                    .and_then(|position| self.trace.nodes.get(*position))
-                    .map(|node| node.locator.clone())
-                {
-                    self.select(locator, None);
-                    self.pane = BrowserPane::Tree;
-                }
-            }
-            BrowserPane::Inspector => {}
-        }
-    }
-
-    pub(crate) fn expand(&mut self) {
-        self.expand_selected();
-    }
-
-    pub(crate) fn collapse_or_parent(&mut self) {
-        if self.expanded.contains(&self.selected) {
-            self.collapse_selected();
-            return;
-        }
-        if let Some(parent) = self.selected_node().and_then(|node| node.parent.clone()) {
-            self.select(parent, None);
-        }
-    }
-
-    fn expand_selected(&mut self) {
-        if !self.expanded.insert(self.selected.clone()) {
-            return;
-        }
-        let Some(row) = self.visible.get_mut(self.selected_row) else {
-            self.rebuild_visible();
+    pub(crate) fn enter_selected(&mut self) {
+        let Some(node) = self.selected_node() else {
             return;
         };
-        row.expanded = true;
-        let parent_position = row.position;
-        let child_depth = row.depth.saturating_add(1);
-        let descendants = self.expanded_descendants(parent_position, child_depth);
-        let insert_at = self.selected_row.saturating_add(1);
-        self.visible.splice(insert_at..insert_at, descendants);
-    }
-
-    fn collapse_selected(&mut self) {
-        if !self.expanded.remove(&self.selected) {
-            return;
-        }
-        let Some(row) = self.visible.get_mut(self.selected_row) else {
-            self.rebuild_visible();
-            return;
-        };
-        row.expanded = false;
-        let depth = row.depth;
-        let start = self.selected_row.saturating_add(1);
-        let end = self.visible[start..]
-            .iter()
-            .position(|candidate| candidate.depth <= depth)
-            .map_or(self.visible.len(), |offset| start + offset);
-        self.visible.drain(start..end);
-    }
-
-    fn expanded_descendants(&self, parent_position: usize, child_depth: usize) -> Vec<VisibleRow> {
-        let Some(parent) = self.trace.nodes.get(parent_position) else {
-            return Vec::new();
-        };
-        let Some(children) = self.ordered_children.get(&parent.locator) else {
-            return Vec::new();
-        };
-        let mut rows = Vec::with_capacity(children.len());
-        let mut visited = HashSet::with_capacity(children.len());
-        visited.insert(parent_position);
-        let mut pending = children
-            .iter()
-            .rev()
-            .map(|position| (*position, child_depth))
-            .collect::<Vec<_>>();
-        while let Some((position, depth)) = pending.pop() {
-            if !visited.insert(position) {
-                continue;
+        let locator = node.locator.clone();
+        if self.index.children(&self.trace, &locator).next().is_some() {
+            if self.ancestor_contains(&locator) {
+                return;
             }
-            let Some(node) = self.trace.nodes.get(position) else {
-                continue;
-            };
-            let has_children = self.has_children.get(position).copied().unwrap_or(false);
-            let expanded = has_children && self.expanded.contains(&node.locator);
-            rows.push(VisibleRow {
-                position,
-                depth,
-                has_children,
-                expanded,
+            let selected = self.selected_node().map(|node| node.locator.clone());
+            self.stack.push(NavigationFrame {
+                container: self.container.clone(),
+                selected,
+                viewport: self.viewport,
             });
-            if expanded && let Some(children) = self.ordered_children.get(&node.locator) {
-                let child_depth = depth.saturating_add(1);
-                pending.extend(children.iter().rev().map(|child| (*child, child_depth)));
-            }
+            self.container = Some(locator);
+            self.viewport = 0;
+            self.rebuild_rows(/*preferred*/ None);
+        } else {
+            self.open_detail();
         }
-        rows
     }
 
-    pub(crate) fn prepare_inspector(&mut self, width: usize, height: usize) -> &[String] {
-        let width = width.max(1);
-        let height = height.max(1);
-        let key = InspectorKey {
-            locator: self.selected.clone(),
+    pub(crate) fn open_detail(&mut self) {
+        if self.selected_node().is_some() {
+            self.detail_open = true;
+            self.detail_scroll = 0;
+            self.content_mode = ContentMode::Rendered;
+            self.invalidate_detail();
+        }
+    }
+
+    pub(crate) fn back(&mut self) -> bool {
+        if self.detail_open {
+            self.detail_open = false;
+            self.detail_scroll = 0;
+            return true;
+        }
+        let Some(frame) = self.stack.pop() else {
+            return false;
+        };
+        self.container = frame.container;
+        self.viewport = frame.viewport;
+        self.rebuild_rows(frame.selected.as_ref());
+        true
+    }
+
+    pub(crate) fn cycle_content_mode(&mut self) {
+        self.content_mode = self.content_mode.next();
+        self.detail_scroll = 0;
+        self.invalidate_detail();
+    }
+
+    pub(crate) fn scroll_detail(&mut self, delta: isize) {
+        self.detail_scroll = self.detail_scroll.saturating_add_signed(delta);
+    }
+
+    pub(crate) fn detail_lines(&mut self, width: usize) -> &[Line<'static>] {
+        let Some(node) = self.selected_node().cloned() else {
+            return &[];
+        };
+        let key = DetailRenderKey {
+            locator: node.locator.clone(),
             width,
+            mode: self.content_mode,
             payload_generation: self.payload_generation,
         };
-        if self.inspector.as_ref().map(|cache| &cache.key) != Some(&key) {
-            let (prefix, payload_id) = build_inspector_prefix(
-                &self.trace,
-                &self.index,
-                &self.selected,
-                &self.payloads,
-                width,
-            );
-            self.inspector = Some(InspectorCache {
+        if self
+            .detail_cache
+            .as_ref()
+            .is_some_and(|cache| cache.key == key)
+        {
+            return self
+                .detail_cache
+                .as_ref()
+                .map(|cache| cache.lines.as_slice())
+                .unwrap_or_default();
+        }
+        if self
+            .pending_detail
+            .as_ref()
+            .is_none_or(|pending| pending.key != key)
+        {
+            self.detail_cache = None;
+            self.detail_generation = self.detail_generation.wrapping_add(1);
+            self.pending_detail = Some(PendingDetail {
+                key: key.clone(),
+                generation: self.detail_generation,
+            });
+            self.queued_detail_job = Some(DetailRenderJob {
                 key,
-                prefix,
-                payload_id,
-                window_start: usize::MAX,
-                window_height: 0,
-                window: Vec::new(),
+                generation: self.detail_generation,
+                trace: Arc::clone(&self.trace),
+                index: Arc::clone(&self.index),
+                payload: self.payloads.get(&node.locator.id).and_then(|state| {
+                    if let PayloadState::Loaded(payload) = state {
+                        Some(Arc::clone(payload))
+                    } else {
+                        None
+                    }
+                }),
+                cwd: self.trace.summary.cwd.clone(),
+                renderer: Arc::clone(&self.renderer),
             });
         }
+        &[]
+    }
 
-        let needs_window = self.inspector.as_ref().is_some_and(|cache| {
-            cache.window_start != self.inspector_scroll || cache.window_height != height
+    pub(crate) fn selected_is_raw_payload(&self) -> bool {
+        self.selected_node()
+            .is_some_and(|node| node.locator.kind == TraceNodeKind::RawPayload)
+    }
+
+    pub(crate) fn detail_truncated(&self) -> bool {
+        self.detail_cache
+            .as_ref()
+            .is_some_and(|cache| cache.truncated)
+    }
+
+    pub(crate) fn take_detail_render_job(&mut self) -> Option<DetailRenderJob> {
+        self.queued_detail_job.take()
+    }
+
+    pub(crate) fn install_detail_render(&mut self, result: DetailRenderResult) {
+        let matches_pending = self.pending_detail.as_ref().is_some_and(|pending| {
+            pending.generation == result.generation && pending.key == result.key
         });
-        if needs_window {
-            let Some(cache) = self.inspector.as_ref() else {
-                return &[];
-            };
-            let payload = cache
-                .payload_id
-                .as_deref()
-                .and_then(|id| self.payloads.get(id))
-                .and_then(|state| match state {
-                    PayloadState::Loaded(payload) => Some(payload.text.as_str()),
-                    PayloadState::Loading | PayloadState::Failed(_) => None,
-                });
-            let window =
-                inspector_window(&cache.prefix, payload, width, self.inspector_scroll, height);
-            let Some(cache) = self.inspector.as_mut() else {
-                return &[];
-            };
-            cache.window_start = self.inspector_scroll;
-            cache.window_height = height;
-            cache.window = window;
+        if !matches_pending {
+            return;
         }
-        self.inspector
-            .as_ref()
-            .map(|cache| cache.window.as_slice())
-            .unwrap_or(&[])
+        self.pending_detail = None;
+        let is_current = self
+            .selected_node()
+            .is_some_and(|node| node.locator == result.key.locator)
+            && self.content_mode == result.key.mode
+            && self.payload_generation == result.key.payload_generation;
+        if !is_current {
+            return;
+        }
+        self.detail_cache = Some(DetailCache {
+            key: result.key,
+            truncated: result.truncated,
+            lines: result.lines,
+        });
     }
 
-    #[cfg(test)]
-    pub(crate) fn cached_visible_row_count(&self) -> usize {
-        self.visible.len()
+    pub(crate) fn selected_payload_request(&mut self) -> Option<(String, RawPayloadHandle)> {
+        let node = self.selected_node()?;
+        if node.locator.kind != TraceNodeKind::RawPayload {
+            return None;
+        }
+        let id = node.locator.id.clone();
+        if self.payloads.contains_key(&id) {
+            return None;
+        }
+        let handle = self.trace.raw_payload(&id)?;
+        self.payloads.insert(id.clone(), PayloadState::Loading);
+        self.payload_generation = self.payload_generation.wrapping_add(1);
+        self.invalidate_detail();
+        Some((id, handle))
     }
 
-    #[cfg(test)]
-    pub(crate) fn inspector_cached_line_count(&self) -> usize {
-        self.inspector
-            .as_ref()
-            .map_or(0, |cache| cache.window.len())
+    pub(crate) fn install_payload(&mut self, id: String, result: Result<SanitizedPayload>) {
+        let state = match result {
+            Ok(payload) => PayloadState::Loaded(Arc::new(payload)),
+            Err(error) => PayloadState::Failed(format!("{error:#}")),
+        };
+        self.payloads.insert(id, state);
+        self.payload_generation = self.payload_generation.wrapping_add(1);
+        self.invalidate_detail();
     }
 
-    /*
-     * Search remains explicit and bounded in codex-trace. It is intentionally
-     * not maintained incrementally during ordinary cursor movement.
-     */
+    pub(crate) fn payload_notice(&self) -> Option<&str> {
+        let node = self.selected_node()?;
+        match self.payloads.get(&node.locator.id) {
+            Some(PayloadState::Loading) => Some("loading exact raw artifact…"),
+            Some(PayloadState::Failed(message)) => Some(message),
+            Some(PayloadState::Loaded(_)) | None => None,
+        }
+    }
 
-    pub(crate) fn begin_search(&mut self) {
+    pub(crate) fn begin_search(&mut self, scope: SearchScope) {
+        self.invalidate_search_job();
         self.search = Some(SearchState {
             query: String::new(),
             hits: Vec::new(),
             selected: 0,
+            scope,
+            loading: false,
+            completed_query: None,
         });
+    }
+
+    pub(crate) fn cancel_search(&mut self) {
+        self.search = None;
+        self.invalidate_search_job();
     }
 
     pub(crate) fn search_push(&mut self, ch: char) {
@@ -565,7 +451,10 @@ impl BrowserState {
             search.query.push(ch);
             search.hits.clear();
             search.selected = 0;
+            search.loading = false;
+            search.completed_query = None;
         }
+        self.invalidate_search_job();
     }
 
     pub(crate) fn search_pop(&mut self) {
@@ -573,18 +462,10 @@ impl BrowserState {
             search.query.pop();
             search.hits.clear();
             search.selected = 0;
+            search.loading = false;
+            search.completed_query = None;
         }
-    }
-
-    fn refresh_search(&mut self) {
-        let Some(query) = self.search.as_ref().map(|search| search.query.clone()) else {
-            return;
-        };
-        let hits = self.trace.search(&query);
-        if let Some(search) = &mut self.search {
-            search.hits = hits;
-            search.selected = search.selected.min(search.hits.len().saturating_sub(1));
-        }
+        self.invalidate_search_job();
     }
 
     pub(crate) fn move_search(&mut self, delta: isize) {
@@ -594,16 +475,68 @@ impl BrowserState {
     }
 
     pub(crate) fn accept_search(&mut self) {
-        self.refresh_search();
-        let locator = self
-            .search
-            .as_ref()
-            .and_then(|search| search.hits.get(search.selected))
+        let Some(search) = &self.search else {
+            return;
+        };
+        if search.loading {
+            return;
+        }
+        let query = search.query.clone();
+        let scope = search.scope;
+        let needs_search = search.completed_query.as_deref() != Some(query.as_str());
+        if needs_search {
+            if query.trim().is_empty() {
+                return;
+            }
+            self.search_generation = self.search_generation.wrapping_add(1);
+            let generation = self.search_generation;
+            if let Some(search) = &mut self.search {
+                search.loading = true;
+                search.hits.clear();
+            }
+            self.pending_search_generation = Some(generation);
+            self.queued_search_job = Some(SearchJob {
+                generation,
+                query,
+                scope,
+                trace: Arc::clone(&self.trace),
+                index: Arc::clone(&self.index),
+                visible_classes: self.visible_classes.clone(),
+            });
+            return;
+        }
+        let Some(search) = self.search.take() else {
+            return;
+        };
+        let locator = search
+            .hits
+            .get(search.selected)
             .map(|hit| hit.locator.clone());
-        self.last_search = self.search.take();
+        self.last_search = Some(search);
         if let Some(locator) = locator {
             self.reveal(locator);
         }
+    }
+
+    pub(crate) fn take_search_job(&mut self) -> Option<SearchJob> {
+        self.queued_search_job.take()
+    }
+
+    pub(crate) fn install_search(&mut self, result: SearchResult) {
+        if self.pending_search_generation != Some(result.generation) {
+            return;
+        }
+        self.pending_search_generation = None;
+        let Some(search) = &mut self.search else {
+            return;
+        };
+        if search.query != result.query || search.scope != result.scope {
+            return;
+        }
+        search.hits = result.hits;
+        search.selected = 0;
+        search.loading = false;
+        search.completed_query = Some(result.query);
     }
 
     pub(crate) fn jump_search(&mut self, delta: isize) {
@@ -619,403 +552,181 @@ impl BrowserState {
         }
     }
 
-    pub(crate) fn selected_is_raw_payload(&self) -> bool {
-        self.selected_node()
-            .is_some_and(|node| node.locator.kind == TraceNodeKind::RawPayload)
+    pub(crate) fn filter_classes() -> &'static [TraceRecordClass] {
+        &TraceRecordClass::ALL
+    }
+
+    pub(crate) fn class_visible(&self, class: TraceRecordClass) -> bool {
+        self.visible_classes.contains(&class)
+    }
+
+    pub(crate) fn toggle_filter_class(&mut self) {
+        let Some(class) = Self::filter_classes().get(self.filter_index).copied() else {
+            return;
+        };
+        let preferred = self.selected_node().map(|node| node.locator.clone());
+        if !self.visible_classes.remove(&class) {
+            self.visible_classes.insert(class);
+        }
+        self.temporary_reveal = None;
+        self.invalidate_visible_search();
+        self.rebuild_rows(preferred.as_ref());
+    }
+
+    pub(crate) fn move_filter(&mut self, delta: isize) {
+        self.filter_index = move_index(self.filter_index, delta, Self::filter_classes().len());
+    }
+
+    pub(crate) fn apply_filter(&mut self) {
+        let preferred = self.selected_node().map(|node| node.locator.clone());
+        self.rebuild_rows(preferred.as_ref());
+        self.filter_open = false;
+    }
+
+    pub(crate) fn reset_filter(&mut self) {
+        self.visible_classes = TraceRecordClass::ALL.into_iter().collect();
+        self.temporary_reveal = None;
+        self.invalidate_visible_search();
+        self.apply_filter();
+    }
+
+    pub(crate) fn hidden_count(&self) -> usize {
+        self.hidden_rows
     }
 
     fn reveal(&mut self, locator: TraceNodeLocator) {
-        let mut current = Some(locator.clone());
+        let Some(node) = self.index.node(&self.trace, &locator) else {
+            return;
+        };
+        let parent = node.parent.clone();
+        self.temporary_reveal = None;
+        if !self.visible_classes.contains(&node.presentation.class) {
+            self.temporary_reveal = Some(locator.clone());
+        }
+        let ancestors = self.ancestor_path(parent.as_ref());
+        self.stack = ancestors
+            .windows(2)
+            .map(|window| NavigationFrame {
+                container: Some(window[0].clone()),
+                selected: Some(window[1].clone()),
+                viewport: 0,
+            })
+            .collect();
+        self.container = parent;
+        self.viewport = 0;
+        self.rebuild_rows(Some(&locator));
+    }
+
+    fn rebuild_rows(&mut self, preferred: Option<&TraceNodeLocator>) {
+        self.rows = match &self.container {
+            Some(container) => self.index.child_positions(&self.trace, container).collect(),
+            None => self.index.root_positions(&self.trace).collect(),
+        };
+        let mut hidden_rows = 0;
+        self.rows.retain(|position| {
+            let visible = self.trace.nodes.get(*position).is_some_and(|node| {
+                self.visible_classes.contains(&node.presentation.class)
+                    || self.temporary_reveal.as_ref() == Some(&node.locator)
+            });
+            hidden_rows += usize::from(!visible);
+            visible
+        });
+        self.hidden_rows = hidden_rows;
+        self.selected = preferred
+            .and_then(|locator| {
+                self.rows.iter().position(|position| {
+                    self.trace
+                        .nodes
+                        .get(*position)
+                        .is_some_and(|node| node.locator == *locator)
+                })
+            })
+            .unwrap_or(0)
+            .min(self.rows.len().saturating_sub(1));
+        self.invalidate_detail();
+    }
+
+    fn ancestor_contains(&self, locator: &TraceNodeLocator) -> bool {
+        self.container.as_ref() == Some(locator)
+            || self
+                .stack
+                .iter()
+                .any(|frame| frame.container.as_ref() == Some(locator))
+    }
+
+    fn ancestor_path(&self, locator: Option<&TraceNodeLocator>) -> Vec<TraceNodeLocator> {
+        let mut path = Vec::new();
+        let mut current = locator;
         let mut visited = BTreeSet::new();
-        while let Some(item) = current {
-            if !visited.insert(item.clone()) {
+        while let Some(locator) = current {
+            if !visited.insert(locator.clone()) {
                 break;
             }
-            let parent = self
+            path.push(locator.clone());
+            current = self
                 .index
-                .node(&self.trace, &item)
-                .and_then(|node| node.parent.clone());
-            if let Some(parent) = &parent {
-                self.expanded.insert(parent.clone());
-            }
-            current = parent;
+                .node(&self.trace, locator)
+                .and_then(|node| node.parent.as_ref());
         }
-        self.rebuild_visible();
-        self.select(locator, None);
-        self.pane = BrowserPane::Tree;
+        path.reverse();
+        path
     }
 
-    pub(crate) fn selected_payload_request(&mut self) -> Option<(String, RawPayloadHandle)> {
-        let node = self.selected_node()?;
-        if node.locator.kind != TraceNodeKind::RawPayload {
-            return None;
+    fn finish_list_move(&mut self) {
+        let preferred = self.selected_node().map(|node| node.locator.clone());
+        if self.temporary_reveal.take().is_some() {
+            self.rebuild_rows(preferred.as_ref());
         }
-        let id = node.locator.id.clone();
-        if self.payloads.contains_key(&id) {
-            return None;
+        self.detail_scroll = 0;
+    }
+
+    fn invalidate_detail(&mut self) {
+        self.detail_cache = None;
+        self.pending_detail = None;
+        self.queued_detail_job = None;
+    }
+
+    fn invalidate_search_job(&mut self) {
+        self.search_generation = self.search_generation.wrapping_add(1);
+        self.pending_search_generation = None;
+        self.queued_search_job = None;
+    }
+
+    fn invalidate_visible_search(&mut self) {
+        if self
+            .last_search
+            .as_ref()
+            .is_some_and(|search| search.scope == SearchScope::Visible)
+        {
+            self.last_search = None;
         }
-        let handle = self.trace.raw_payload(&id)?;
-        self.payloads.insert(id.clone(), PayloadState::Loading);
-        self.payload_generation = self.payload_generation.wrapping_add(1);
-        self.inspector = None;
-        Some((id, handle))
-    }
-
-    pub(crate) fn install_payload(&mut self, id: String, result: anyhow::Result<SanitizedPayload>) {
-        let state = match result {
-            Ok(payload) => PayloadState::Loaded(payload),
-            Err(error) => PayloadState::Failed(format!("{error:#}")),
-        };
-        self.payloads.insert(id, state);
-        self.payload_generation = self.payload_generation.wrapping_add(1);
-        self.inspector_scroll = 0;
-        self.inspector = None;
-    }
-
-    pub(crate) fn diagnostics(&self) -> &[TraceDiagnostic] {
-        &self.trace.diagnostics
-    }
-
-    pub(crate) fn move_diagnostic(&mut self, delta: isize) {
-        self.diagnostic_index =
-            move_index(self.diagnostic_index, delta, self.trace.diagnostics.len());
-    }
-}
-
-fn ordered_structure(
-    trace: &SessionTrace,
-) -> (Vec<usize>, HashMap<TraceNodeLocator, Vec<usize>>, Vec<bool>) {
-    let mut roots = Vec::new();
-    let mut children = HashMap::<TraceNodeLocator, Vec<usize>>::new();
-    for (position, node) in trace.nodes.iter().enumerate() {
-        if let Some(parent) = &node.parent {
-            children.entry(parent.clone()).or_default().push(position);
-        } else {
-            roots.push(position);
+        let invalidate_active = self
+            .search
+            .as_ref()
+            .is_some_and(|search| search.scope == SearchScope::Visible);
+        if invalidate_active && let Some(search) = &mut self.search {
+            search.hits.clear();
+            search.loading = false;
+            search.completed_query = None;
+        }
+        if invalidate_active {
+            self.invalidate_search_job();
         }
     }
-    roots.sort_by(|left, right| compare_positions(trace, *left, *right));
-    for positions in children.values_mut() {
-        positions.sort_by(|left, right| compare_positions(trace, *left, *right));
-    }
-    let has_children = trace
-        .nodes
-        .iter()
-        .map(|node| children.contains_key(&node.locator))
-        .collect();
-    (roots, children, has_children)
-}
-
-fn compare_positions(trace: &SessionTrace, left: usize, right: usize) -> std::cmp::Ordering {
-    let left = &trace.nodes[left];
-    let right = &trace.nodes[right];
-    left.timestamp
-        .cmp(&right.timestamp)
-        .then_with(|| left.locator.cmp(&right.locator))
-}
-
-fn build_inspector_prefix(
-    trace: &SessionTrace,
-    index: &TraceIndex,
-    selected: &TraceNodeLocator,
-    payloads: &BTreeMap<String, PayloadState>,
-    width: usize,
-) -> (Vec<String>, Option<String>) {
-    let Some(node) = index.node(trace, selected) else {
-        return (vec!["No inspectable node".to_string()], None);
-    };
-    let mut lines = wrap_bounded_lines(
-        &format!("{} — {}", kind_name(node.locator.kind), node.label),
-        width,
-    );
-    lines.push(format!("id: {}", sanitize_display(&node.locator.id)));
-    lines.push(format!(
-        "timestamp: {}",
-        sanitize_display(node.timestamp.as_deref().unwrap_or("unavailable"))
-    ));
-    lines.push(format!(
-        "evidence: {} · {}",
-        source_name(node.provenance),
-        evidence_name(node.evidence)
-    ));
-    if node.locator.kind == TraceNodeKind::Session {
-        let capabilities = trace.summary.capabilities;
-        lines.push("capabilities:".to_string());
-        lines.extend([
-            capability_text("ordinary transcript", capabilities.ordinary_transcript),
-            capability_text("raw rollout records", capabilities.raw_rollout_records),
-            capability_text(
-                "exact inference context",
-                capabilities.exact_inference_context,
-            ),
-            capability_text("per-generation usage", capabilities.per_generation_usage),
-            capability_text("runtime graph", capabilities.runtime_graph),
-            capability_text("raw payloads", capabilities.raw_payloads),
-            capability_text("compaction detail", capabilities.compaction_detail),
-        ]);
-    }
-    lines.push(String::new());
-    let detail = bounded_pretty_json(&node.detail, STRUCTURED_DETAIL_LIMIT);
-    lines.extend(wrap_bounded_lines(&detail.text, width));
-    if detail.truncated {
-        lines.push(format!(
-            "… structured detail truncated after {STRUCTURED_DETAIL_LIMIT} bytes"
-        ));
-    }
-
-    if node.locator.kind != TraceNodeKind::RawPayload {
-        return (lines, None);
-    }
-    lines.push(String::new());
-    match payloads.get(&node.locator.id) {
-        None => {
-            lines.push("Raw payload collapsed. Press Enter (or r) to load up to 1 MiB.".to_string())
-        }
-        Some(PayloadState::Loading) => lines.push("Loading raw payload…".to_string()),
-        Some(PayloadState::Failed(message)) => lines.push(format!(
-            "Raw payload unavailable: {}",
-            sanitize_display(message)
-        )),
-        Some(PayloadState::Loaded(payload)) => {
-            let suffix = if payload.truncated {
-                " [truncated]"
-            } else {
-                ""
-            };
-            lines.push(format!(
-                "Raw payload · {} bytes observed{suffix}",
-                payload.original_bytes_read
-            ));
-            return (lines, Some(node.locator.id.clone()));
-        }
-    }
-    (lines, None)
-}
-
-fn inspector_window(
-    prefix: &[String],
-    payload: Option<&str>,
-    width: usize,
-    start: usize,
-    height: usize,
-) -> Vec<String> {
-    let mut lines = prefix
-        .iter()
-        .skip(start)
-        .take(height)
-        .cloned()
-        .collect::<Vec<_>>();
-    if lines.len() < height
-        && let Some(payload) = payload
-    {
-        let payload_start = start.saturating_sub(prefix.len());
-        let remaining = height - lines.len();
-        lines.extend(wrap_window(payload, width, payload_start, remaining));
-    }
-    if lines.is_empty() {
-        lines.push(String::new());
-    }
-    lines
-}
-
-struct BoundedJson {
-    text: String,
-    truncated: bool,
-}
-
-fn bounded_pretty_json(value: &serde_json::Value, limit: usize) -> BoundedJson {
-    let mut writer = LimitedWriter::new(limit);
-    let result = serde_json::to_writer_pretty(&mut writer, value);
-    if let Err(error) = result
-        && !writer.truncated
-    {
-        return BoundedJson {
-            text: format!("cannot render node detail: {error}"),
-            truncated: false,
-        };
-    }
-    BoundedJson {
-        text: String::from_utf8_lossy(&writer.bytes).into_owned(),
-        truncated: writer.truncated,
-    }
-}
-
-struct LimitedWriter {
-    bytes: Vec<u8>,
-    limit: usize,
-    truncated: bool,
-}
-
-impl LimitedWriter {
-    fn new(limit: usize) -> Self {
-        Self {
-            bytes: Vec::with_capacity(limit.min(4096)),
-            limit,
-            truncated: false,
-        }
-    }
-}
-
-impl Write for LimitedWriter {
-    fn write(&mut self, buffer: &[u8]) -> std::io::Result<usize> {
-        let remaining = self.limit.saturating_sub(self.bytes.len());
-        if buffer.len() <= remaining {
-            self.bytes.extend_from_slice(buffer);
-            return Ok(buffer.len());
-        }
-        self.bytes.extend_from_slice(&buffer[..remaining]);
-        self.truncated = true;
-        Err(std::io::Error::other(
-            "structured detail display limit reached",
-        ))
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
-    }
-}
-
-fn wrap_window(text: &str, width: usize, start: usize, count: usize) -> Vec<String> {
-    if count == 0 {
-        return Vec::new();
-    }
-    let width = width.max(1);
-    let end = start.saturating_add(count);
-    let mut row = 0usize;
-    let mut column = 0usize;
-    let mut current = String::new();
-    let mut lines = Vec::new();
-    let push_row = |current: &mut String, row: &mut usize, lines: &mut Vec<String>| {
-        if *row >= start && *row < end {
-            lines.push(std::mem::take(current));
-        } else {
-            current.clear();
-        }
-        *row = row.saturating_add(1);
-    };
-
-    for original in text.chars() {
-        if row >= end {
-            break;
-        }
-        let ch = if matches!(original, '\n' | '\t') || !original.is_control() {
-            original
-        } else {
-            '�'
-        };
-        if ch == '\n' {
-            push_row(&mut current, &mut row, &mut lines);
-            column = 0;
-            continue;
-        }
-        if column == width {
-            push_row(&mut current, &mut row, &mut lines);
-            column = 0;
-            if row >= end {
-                break;
-            }
-        }
-        current.push(ch);
-        column = column.saturating_add(1);
-    }
-    if row < end && (!current.is_empty() || text.is_empty()) {
-        push_row(&mut current, &mut row, &mut lines);
-    }
-    lines
-}
-
-fn wrap_bounded_lines(text: &str, width: usize) -> Vec<String> {
-    let width = width.max(1);
-    let mut lines = Vec::new();
-    for source_line in sanitize_display(text).lines() {
-        for wrapped in textwrap::wrap(source_line, width) {
-            lines.push(wrapped.into_owned());
-        }
-        if source_line.is_empty() {
-            lines.push(String::new());
-        }
-    }
-    if lines.is_empty() {
-        lines.push(String::new());
-    }
-    lines
-}
-
-fn sanitize_display(text: &str) -> String {
-    text.chars()
-        .map(|ch| {
-            if matches!(ch, '\n' | '\t') || !ch.is_control() {
-                ch
-            } else {
-                '�'
-            }
-        })
-        .collect()
-}
-
-fn source_name(source: codex_trace::TraceSourceKind) -> &'static str {
-    match source {
-        codex_trace::TraceSourceKind::Ordinary => "ordinary",
-        codex_trace::TraceSourceKind::Rich => "rich",
-        codex_trace::TraceSourceKind::Merged => "merged",
-    }
-}
-
-fn evidence_name(evidence: codex_trace::EvidenceGrade) -> &'static str {
-    match evidence {
-        codex_trace::EvidenceGrade::Exact => "exact",
-        codex_trace::EvidenceGrade::Semantic => "semantic",
-        codex_trace::EvidenceGrade::Reconstructed => "reconstructed",
-        codex_trace::EvidenceGrade::Unavailable => "unavailable",
-        codex_trace::EvidenceGrade::Conflicting => "conflicting",
-    }
-}
-
-fn kind_name(kind: TraceNodeKind) -> &'static str {
-    match kind {
-        TraceNodeKind::Session => "Session",
-        TraceNodeKind::Thread => "Agent thread",
-        TraceNodeKind::Turn => "Turn",
-        TraceNodeKind::Inference => "Inference call",
-        TraceNodeKind::ConversationItem => "Conversation item",
-        TraceNodeKind::ToolCall => "Tool call",
-        TraceNodeKind::CodeCell => "Code cell",
-        TraceNodeKind::TerminalSession => "Terminal session",
-        TraceNodeKind::TerminalOperation => "Terminal operation",
-        TraceNodeKind::Compaction => "Compaction",
-        TraceNodeKind::CompactionRequest => "Compaction request",
-        TraceNodeKind::InteractionEdge => "Interaction edge",
-        TraceNodeKind::RawPayload => "Raw payload",
-        TraceNodeKind::RolloutRecord => "Rollout record",
-        TraceNodeKind::Diagnostic => "Diagnostic",
-    }
-}
-
-fn capability_text(name: &str, available: bool) -> String {
-    let marker = if available { "yes" } else { "no" };
-    format!("  {name}: {marker}")
 }
 
 fn move_index(current: usize, delta: isize, len: usize) -> usize {
     if len == 0 {
         return 0;
     }
-    if delta.is_negative() {
-        current.saturating_sub(delta.unsigned_abs())
-    } else {
-        current
-            .saturating_add(delta as usize)
-            .min(len.saturating_sub(1))
-    }
+    current
+        .saturating_add_signed(delta)
+        .min(len.saturating_sub(1))
 }
 
 fn move_wrapped(current: usize, delta: isize, len: usize) -> usize {
     if len == 0 {
         return 0;
     }
-    if delta.is_negative() {
-        (current + len - (delta.unsigned_abs() % len)) % len
-    } else {
-        (current + delta as usize) % len
-    }
+    current.wrapping_add_signed(delta) % len
 }

@@ -16,7 +16,7 @@ catalog loading → root picker → selected-session loading → browser
                       └──────── error or back ───────────┘
 ```
 
-The picker owns selection and query state over catalog summaries. The browser owns a current locator, breadcrumb path, active pane, inspector state, search query and matches, viewport positions, and lazily installed payload content.
+The picker owns selection and query state over catalog summaries. The browser owns a current container, a locator-based return stack, selection and viewport positions, detail mode and cache, visibility classes, search state, and lazily installed payload content.
 
 Background results are tagged by their requested operation before they replace state. Cancellation or failure returns to the previous stable screen and exposes an error without installing a partial session.
 
@@ -32,37 +32,35 @@ The current rich reducer is synchronous inside its background task. Aborting the
 
 The root picker shows bounded summary metadata and source badges without loading a full trace.
 
-The browser has three conceptual surfaces:
+The browser always renders one full-width surface: either the current container's direct children or full-screen detail for one record.
 
-1. breadcrumb and thread hierarchy;
-2. ordered children of the selected node;
-3. semantic or raw inspector.
+Listing rows contain an elastic name, caller-selected aligned metadata values without labels, optional headers, and an opportunistic bounded preview. Lower-priority columns and previews disappear as width contracts; navigation and record availability do not change with width.
 
-Wide terminals show all three. Medium terminals combine hierarchy with the active content surface. Narrow terminals show one surface at a time. The same enter, back, pane, and search actions apply at every width, and no information is available only through color.
+Every row passes through the injected `TraceVisualRenderer`. The parent Codex TUI adapter reuses its terminal palette, message backgrounds, Markdown renderer, and syntax highlighter, while the standalone fallback remains deterministic and plain. Role and type remain visible in text so color is never the sole distinction.
 
 ## Navigation
 
-Navigation is locator-based so filtering and sorting do not invalidate identity. Enter moves to a directory-like child or opens item detail; back returns through the breadcrumb path; parent and child thread movement uses model relationships rather than parsing display text.
+Navigation is locator-based so filtering and sorting do not invalidate identity. Enter moves to a child container or opens leaf detail; `i` opens any record; back closes detail or restores the exact parent selection and viewport. There is no fold, expansion, pane, or disclosure state.
 
-Search runs on explicit submission and returns model-attributed hits. Moving between hits selects their locators and exposes the matching field and snippet. Raw payload search is not part of the current state model.
+Visible search runs over the enabled semantic classes, while all-record search may temporarily reveal one hidden result without mutating the filter. Submitted searches run in generation-tagged background jobs over shared immutable trace/index snapshots; an edited, cancelled, or superseded query cannot install a stale result. Moving between attributed hits selects their locators and exposes the matching field and snippet. Raw payload search is not part of the current state model.
 
 ## Rendering and performance contract
 
 Rendering must scale with terminal area and visible detail, not with total trace size. Lists render a viewport window. Wrapped detail should be cached by locator, width, display mode, and payload state. Repeated labels and summaries should be prepared when state changes rather than serialized during every frame.
 
-The browser builds one `TraceIndex` with its selected session, caches the flattened visible tree until expansion state changes, caches the ordered children of the selected node, and keeps the selected visible-row position. Ordinary cursor movement and redraw therefore do not scan the complete trace. Tree, child, search, and diagnostic renderers materialize only a terminal-sized viewport.
+The browser builds one `TraceIndex` with its selected session and retains only the current container's filtered child positions. Ordinary cursor movement and redraw therefore touch a terminal-sized viewport rather than flattening or scanning the complete trace.
 
-The inspector cache is keyed by locator, width, and payload generation. Structured JSON display is capped at 64 KiB and discloses truncation. Loaded raw payloads remain bounded by the source reader, and the renderer wraps only the requested scroll window; it does not construct a complete wrapped payload on open or on every frame.
-
-Normal expansion splices the selected node's materialized descendants immediately after its visible row, and normal collapse drains the contiguous descendant range below that row. Their cost is proportional to the affected subtree rather than the complete visible tree; a full rebuild remains only as defensive recovery when cached selection state is inconsistent. The deterministic 100,000-node profile records expansion and collapse separately from warm navigation so a pathological single-parent fan-out remains visible rather than being averaged away.
+The detail cache is keyed by locator, width, content mode, and payload generation. Semantic extraction and host rendering run in generation-tagged background jobs over shared immutable trace/index snapshots, so resizing or changing modes cannot install stale work. Semantic detail is capped at 64 KiB and discloses truncation; loaded raw payloads remain bounded by the source reader. A deterministic 100,000-node profile measures current-level construction, return, and warm navigation without expansion-specific state.
 
 Do not solve a rendering freeze by dropping provenance, truncating without disclosure, eagerly loading raw payloads, or hiding malformed nodes.
 
-## Inspector
+## Detail modes
 
-The semantic inspector shows kind, source, evidence grade, timestamps or sequence, capabilities, source-local identity, relationships, diagnostics, and bounded structured fields.
+Full-screen detail shows labeled kind, class, source, evidence grade, timestamp, status, and identity metadata above record content.
 
-Raw payload references begin collapsed. Opening one dispatches a background read through the model's contained reader and installs sanitized bounded text when complete. Rendering never interprets ANSI, hyperlink, shell, or terminal control content. The inspector presents only its active window, while the underlying bounded payload remains available for scrolling.
+Rendered mode preserves semantic Markdown, JSON, and code formats for the host renderer. Text mode displays interpreted semantic content with decoded line breaks. Raw mode displays exact raw bytes only through a contained payload handle; otherwise it labels normalized JSON as semantic rather than exact evidence.
+
+Raw payload references remain unloaded in listings. Opening one dispatches a background read through the model's contained reader and installs sanitized bounded text when complete. Rendering never executes or interprets source ANSI, hyperlink, shell, or terminal control content.
 
 Conflicts preserve both source observations. Unavailable data is labeled unavailable, not represented by an empty string or a plausible reconstruction.
 
@@ -74,6 +72,6 @@ Errors should identify the failed operation without echoing excessive sensitive 
 
 ## Tests
 
-State-transition tests cover key actions, loading, cancellation, errors, search, and payload installation. Ratatui snapshots cover narrow, medium, and wide layouts using deterministic synthetic data.
+State-transition tests cover key actions, loading, cancellation, errors, level return, search, filters, detail modes, and payload installation. Ratatui snapshots cover narrow, medium, and wide layouts using deterministic synthetic data.
 
-The ignored `profile_hundred_thousand_node_navigation` test deterministically builds a limit-sized ordinary trace, records index/browser construction, first large-subtree expansion, 1,000 warm navigation samples, and 20 warm expand/collapse samples, and enforces a 50 ms p95 for navigation and expansion. Ordinary tests assert that inspector rendering retains at most a viewport of a large payload and that visible-row state is cached. End-to-end tests operate without network or authentication and compare every input byte before and after browsing.
+The ignored `profile_hundred_thousand_node_navigation` test deterministically builds a limit-sized ordinary trace, records index/browser construction, first large-level entry, 1,000 warm navigation samples, and repeated level return/entry samples, and enforces a 50 ms p95 for navigation and entry. End-to-end tests operate without network or authentication and compare every input byte before and after browsing.

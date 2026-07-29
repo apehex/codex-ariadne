@@ -103,6 +103,113 @@ pub enum TraceNodeKind {
     Diagnostic,
 }
 
+/// Primary semantic class used by trace views for styling and filtering.
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum TraceRecordClass {
+    Structure,
+    System,
+    Developer,
+    User,
+    Assistant,
+    Commentary,
+    FinalAnswer,
+    Reasoning,
+    ToolInput,
+    ToolOutput,
+    Code,
+    Delegation,
+    Compaction,
+    Diagnostic,
+    RawArtifact,
+    #[default]
+    Other,
+}
+
+impl TraceRecordClass {
+    /// Stable complete class order used by filter controls.
+    pub const ALL: [Self; 16] = [
+        Self::Structure,
+        Self::System,
+        Self::Developer,
+        Self::User,
+        Self::Assistant,
+        Self::Commentary,
+        Self::FinalAnswer,
+        Self::Reasoning,
+        Self::ToolInput,
+        Self::ToolOutput,
+        Self::Code,
+        Self::Delegation,
+        Self::Compaction,
+        Self::Diagnostic,
+        Self::RawArtifact,
+        Self::Other,
+    ];
+}
+
+/// Model-visible role associated with a normalized record.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TraceRecordRole {
+    System,
+    Developer,
+    User,
+    Assistant,
+    Tool,
+}
+
+/// Codex content channel associated with a normalized record.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TraceRecordChannel {
+    Analysis,
+    Commentary,
+    Final,
+    Summary,
+}
+
+/// Small, eagerly retained facts needed to present a record without rescanning its detail.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TraceRecordPresentation {
+    /// Primary styling and filtering class.
+    pub class: TraceRecordClass,
+    /// Model-visible role when the source provides one.
+    pub role: Option<TraceRecordRole>,
+    /// Codex content channel when the source provides one.
+    pub channel: Option<TraceRecordChannel>,
+    /// Runtime or completion state when present.
+    pub status: Option<TraceStatus>,
+    /// Bounded single-line content summary for wide listings.
+    pub preview: Option<String>,
+}
+
+/// Semantic format selected for a record's bounded detail document.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TraceContentFormat {
+    /// Markdown suitable for Codex's semantic renderer.
+    Markdown,
+    /// Plain, already interpreted text.
+    Text,
+    /// Normalized JSON.
+    Json,
+    /// Source code with an optional highlighter language name.
+    Code { language: String },
+}
+
+/// Bounded semantic content prepared for full-screen presentation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TraceContentDocument {
+    /// Semantic rendering format.
+    pub format: TraceContentFormat,
+    /// Bounded interpreted content.
+    pub text: String,
+    /// Whether the source content exceeded the requested byte limit.
+    pub truncated: bool,
+}
+
 /// Stable address for one node within a session.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct TraceNodeLocator {
@@ -190,7 +297,354 @@ pub struct TraceNode {
     pub evidence: EvidenceGrade,
     pub timestamp: Option<String>,
     pub label: String,
+    #[serde(default)]
+    pub presentation: TraceRecordPresentation,
     pub detail: Value,
+}
+
+impl TraceNode {
+    /// Builds a bounded semantic document without reading any referenced raw payload.
+    pub fn content_document(&self, byte_limit: usize) -> TraceContentDocument {
+        let (format, text) = semantic_content(self);
+        let text = sanitize_terminal_text(&text);
+        let (text, truncated) = truncate_utf8(text, byte_limit);
+        TraceContentDocument {
+            format,
+            text,
+            truncated,
+        }
+    }
+}
+
+impl TraceRecordPresentation {
+    pub(crate) fn from_detail(kind: TraceNodeKind, detail: &Value) -> Self {
+        let role = find_string(detail, &["role"]).and_then(parse_role);
+        let channel = find_string(detail, &["channel"]).and_then(parse_channel);
+        let class = classify_record(kind, role, channel, detail);
+        let status = find_string(detail, &["status", "outcome"]).and_then(parse_status);
+        let preview = preview_text(detail).map(|text| one_line_preview(&text, 256));
+        Self {
+            class,
+            role,
+            channel,
+            status,
+            preview,
+        }
+    }
+}
+
+fn classify_record(
+    kind: TraceNodeKind,
+    role: Option<TraceRecordRole>,
+    channel: Option<TraceRecordChannel>,
+    detail: &Value,
+) -> TraceRecordClass {
+    if matches!(
+        kind,
+        TraceNodeKind::ConversationItem | TraceNodeKind::RolloutRecord
+    ) && let Some(class) = semantic_record_class(role, channel, detail)
+    {
+        return class;
+    }
+    match kind {
+        TraceNodeKind::Session
+        | TraceNodeKind::Thread
+        | TraceNodeKind::Turn
+        | TraceNodeKind::Inference
+        | TraceNodeKind::TerminalSession
+        | TraceNodeKind::TerminalOperation
+        | TraceNodeKind::RolloutRecord => TraceRecordClass::Structure,
+        TraceNodeKind::ToolCall => {
+            if detail
+                .get("kind")
+                .and_then(Value::as_str)
+                .is_some_and(|kind| kind.contains("agent"))
+            {
+                TraceRecordClass::Delegation
+            } else {
+                TraceRecordClass::ToolInput
+            }
+        }
+        TraceNodeKind::CodeCell => TraceRecordClass::Code,
+        TraceNodeKind::Compaction | TraceNodeKind::CompactionRequest => {
+            TraceRecordClass::Compaction
+        }
+        TraceNodeKind::InteractionEdge => TraceRecordClass::Delegation,
+        TraceNodeKind::RawPayload => TraceRecordClass::RawArtifact,
+        TraceNodeKind::Diagnostic => TraceRecordClass::Diagnostic,
+        TraceNodeKind::ConversationItem => TraceRecordClass::Other,
+    }
+}
+
+fn semantic_record_class(
+    role: Option<TraceRecordRole>,
+    channel: Option<TraceRecordChannel>,
+    detail: &Value,
+) -> Option<TraceRecordClass> {
+    if contains_named_string(detail, &["type", "kind"], &["reasoning", "agent_reasoning"]) {
+        return Some(TraceRecordClass::Reasoning);
+    }
+    if contains_named_string(
+        detail,
+        &["type", "kind"],
+        &[
+            "function_call_output",
+            "custom_tool_call_output",
+            "mcp_tool_call_output",
+            "tool_output",
+        ],
+    ) {
+        return Some(TraceRecordClass::ToolOutput);
+    }
+    if contains_named_string(
+        detail,
+        &["type", "kind"],
+        &[
+            "function_call",
+            "custom_tool_call",
+            "mcp_tool_call",
+            "tool_call",
+        ],
+    ) {
+        return Some(TraceRecordClass::ToolInput);
+    }
+    if contains_named_string(detail, &["type", "kind"], &["user_message"]) {
+        return Some(TraceRecordClass::User);
+    }
+    if contains_named_string(detail, &["type", "kind"], &["developer_message"]) {
+        return Some(TraceRecordClass::Developer);
+    }
+    if contains_named_string(detail, &["type", "kind"], &["system_message"]) {
+        return Some(TraceRecordClass::System);
+    }
+    if contains_named_string(
+        detail,
+        &["type", "kind"],
+        &["agent_message", "assistant_message"],
+    ) {
+        return Some(assistant_class(channel));
+    }
+    match role {
+        Some(TraceRecordRole::Tool) => Some(TraceRecordClass::ToolInput),
+        Some(TraceRecordRole::System) => Some(TraceRecordClass::System),
+        Some(TraceRecordRole::Developer) => Some(TraceRecordClass::Developer),
+        Some(TraceRecordRole::User) => Some(TraceRecordClass::User),
+        Some(TraceRecordRole::Assistant) => Some(assistant_class(channel)),
+        None => None,
+    }
+}
+
+fn assistant_class(channel: Option<TraceRecordChannel>) -> TraceRecordClass {
+    match channel {
+        Some(TraceRecordChannel::Commentary) => TraceRecordClass::Commentary,
+        Some(TraceRecordChannel::Final) => TraceRecordClass::FinalAnswer,
+        Some(TraceRecordChannel::Analysis | TraceRecordChannel::Summary) | None => {
+            TraceRecordClass::Assistant
+        }
+    }
+}
+
+fn semantic_content(node: &TraceNode) -> (TraceContentFormat, String) {
+    if node.presentation.class == TraceRecordClass::Code
+        && let Some(source) = find_string(&node.detail, &["source"])
+    {
+        let language = find_string(&node.detail, &["language"]).unwrap_or("text");
+        return (
+            TraceContentFormat::Code {
+                language: language.to_string(),
+            },
+            source.to_string(),
+        );
+    }
+    let text = collect_content_text(&node.detail);
+    if !text.is_empty() {
+        if matches!(
+            node.presentation.class,
+            TraceRecordClass::ToolInput | TraceRecordClass::ToolOutput
+        ) && let Ok(value) = serde_json::from_str::<Value>(&text)
+        {
+            return (
+                TraceContentFormat::Json,
+                serde_json::to_string_pretty(&value).unwrap_or(text),
+            );
+        }
+        let format = match node.presentation.class {
+            TraceRecordClass::Assistant
+            | TraceRecordClass::Commentary
+            | TraceRecordClass::FinalAnswer
+            | TraceRecordClass::Reasoning => TraceContentFormat::Markdown,
+            TraceRecordClass::System | TraceRecordClass::Developer | TraceRecordClass::User => {
+                TraceContentFormat::Text
+            }
+            TraceRecordClass::ToolInput | TraceRecordClass::ToolOutput => TraceContentFormat::Text,
+            TraceRecordClass::Structure
+            | TraceRecordClass::Code
+            | TraceRecordClass::Delegation
+            | TraceRecordClass::Compaction
+            | TraceRecordClass::Diagnostic
+            | TraceRecordClass::RawArtifact
+            | TraceRecordClass::Other => TraceContentFormat::Json,
+        };
+        if !matches!(format, TraceContentFormat::Json) {
+            return (format, text);
+        }
+    }
+    (
+        TraceContentFormat::Json,
+        serde_json::to_string_pretty(&node.detail).unwrap_or_else(|_| node.detail.to_string()),
+    )
+}
+
+fn collect_content_text(value: &Value) -> String {
+    let mut parts = Vec::new();
+    collect_named_strings(
+        value,
+        &[
+            "text",
+            "message",
+            "summary",
+            "source",
+            "output",
+            "arguments",
+            "value",
+        ],
+        &mut parts,
+    );
+    parts.join("\n\n")
+}
+
+fn collect_named_strings(value: &Value, names: &[&str], output: &mut Vec<String>) {
+    match value {
+        Value::Object(map) => {
+            for (name, value) in map {
+                if names.contains(&name.as_str())
+                    && let Some(text) = value.as_str()
+                {
+                    output.push(text.to_string());
+                    continue;
+                }
+                collect_named_strings(value, names, output);
+            }
+        }
+        Value::Array(values) => {
+            for value in values {
+                collect_named_strings(value, names, output);
+            }
+        }
+        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {}
+    }
+}
+
+fn preview_text(value: &Value) -> Option<String> {
+    find_string(
+        value,
+        &[
+            "text",
+            "message",
+            "summary",
+            "source",
+            "command",
+            "arguments",
+            "output",
+        ],
+    )
+    .map(str::to_owned)
+}
+
+fn find_string<'a>(value: &'a Value, names: &[&str]) -> Option<&'a str> {
+    match value {
+        Value::Object(map) => {
+            for name in names {
+                if let Some(text) = map.get(*name).and_then(Value::as_str) {
+                    return Some(text);
+                }
+            }
+            map.values().find_map(|value| find_string(value, names))
+        }
+        Value::Array(values) => values.iter().find_map(|value| find_string(value, names)),
+        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => None,
+    }
+}
+
+fn contains_named_string(value: &Value, names: &[&str], candidates: &[&str]) -> bool {
+    match value {
+        Value::Object(map) => map.iter().any(|(name, value)| {
+            (names.contains(&name.as_str())
+                && value
+                    .as_str()
+                    .is_some_and(|text| candidates.contains(&text)))
+                || contains_named_string(value, names, candidates)
+        }),
+        Value::Array(values) => values
+            .iter()
+            .any(|value| contains_named_string(value, names, candidates)),
+        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => false,
+    }
+}
+
+fn parse_role(role: &str) -> Option<TraceRecordRole> {
+    match role {
+        "system" => Some(TraceRecordRole::System),
+        "developer" => Some(TraceRecordRole::Developer),
+        "user" => Some(TraceRecordRole::User),
+        "assistant" => Some(TraceRecordRole::Assistant),
+        "tool" => Some(TraceRecordRole::Tool),
+        _ => None,
+    }
+}
+
+fn parse_channel(channel: &str) -> Option<TraceRecordChannel> {
+    match channel {
+        "analysis" => Some(TraceRecordChannel::Analysis),
+        "commentary" => Some(TraceRecordChannel::Commentary),
+        "final" => Some(TraceRecordChannel::Final),
+        "summary" => Some(TraceRecordChannel::Summary),
+        _ => None,
+    }
+}
+
+fn parse_status(status: &str) -> Option<TraceStatus> {
+    match status {
+        "running" | "started" => Some(TraceStatus::Running),
+        "completed" | "complete" | "succeeded" | "success" => Some(TraceStatus::Completed),
+        "failed" | "error" => Some(TraceStatus::Failed),
+        "aborted" | "cancelled" | "canceled" | "interrupted" => Some(TraceStatus::Aborted),
+        "unknown" => Some(TraceStatus::Unknown),
+        _ => None,
+    }
+}
+
+fn one_line_preview(text: &str, limit: usize) -> String {
+    let mut preview = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    if preview.chars().count() > limit {
+        preview = preview.chars().take(limit).collect();
+        preview.push('…');
+    }
+    preview
+}
+
+fn truncate_utf8(mut text: String, byte_limit: usize) -> (String, bool) {
+    if text.len() <= byte_limit {
+        return (text, false);
+    }
+    let mut end = byte_limit.min(text.len());
+    while !text.is_char_boundary(end) {
+        end = end.saturating_sub(1);
+    }
+    text.truncate(end);
+    (text, true)
+}
+
+fn sanitize_terminal_text(text: &str) -> String {
+    text.chars()
+        .map(|character| {
+            if matches!(character, '\n' | '\t') || !character.is_control() {
+                character
+            } else {
+                '�'
+            }
+        })
+        .collect()
 }
 
 /// A loaded root session, ready for tree browsing and local search.
@@ -301,3 +755,7 @@ pub(crate) struct BundlePayload {
     pub bundle_root: PathBuf,
     pub reference: RawPayloadRef,
 }
+
+#[cfg(test)]
+#[path = "model_tests.rs"]
+mod tests;

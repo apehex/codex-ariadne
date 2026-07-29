@@ -273,4 +273,8 @@ Close this plan only after recording:
 - deterministic fixture fingerprints, performance job metadata, and results;
 - any rejected approach, residual gap, or successor plan.
 
-The closeout must also update the residual gates in `.ariadne/plans/open/2026-07-28-credible-historical-trace-browser.md`. Do not close this plan merely because implementation exists locally, a timing target passes once, or a release note asserts readiness. No push, tag, release, repository-setting change, or external publication is authorized by this plan. 
+The closeout must also update the residual gates in `.ariadne/plans/open/2026-07-28-credible-historical-trace-browser.md`. Do not close this plan merely because implementation exists locally, a timing target passes once, or a release note asserts readiness. No push, tag, release, repository-setting change, or external publication is authorized by this plan.
+
+## Successor UI coordination
+
+The accepted `.ariadne/plans/open/2026-07-28-single-panel-trace-browser.md` owns the replacement of panes, flattened-tree expansion, inspector layout, presentation snapshots, and expansion-specific performance evidence. This plan retains authority over source correctness, evidence preservation, bounds, containment, asynchronous lifecycle, picker/search responsiveness, test depth, documentation coverage, and focused CI. Interpret Movement 3's expansion/collapse references as single-level descent/return and current-level viewport requirements; do not preserve obsolete folding behavior merely to satisfy historical wording.

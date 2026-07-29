@@ -20,6 +20,10 @@ Filesystem discovery is the default. The model does not open a writable Codex st
 
 Node kinds cover sessions, agent threads, turns, inference calls, messages, agent communication, tools, code and terminal activity, compactions, interaction edges, raw payloads, and diagnostics.
 
+Each node also retains a bounded presentation descriptor derived during projection: a primary record class, optional role/channel/status, and one-line preview. Consumers use this typed boundary for styling and filtering rather than rescanning arbitrary JSON during every frame.
+
+`TraceNode::content_document` extracts bounded interpreted Markdown, text, JSON, or code while preserving decoded newlines. It never follows raw payload references; exact artifact access remains an explicit lazy operation through `RawPayloadHandle`.
+
 Containment and causality are distinct. Parent-child edges answer where an item belongs; interaction edges answer how information moved. Broken parent links remain observable, orphans remain reachable, and cycles are cut with a diagnostic.
 
 Children use recorded sequence when available and stable timestamp-and-identity ordering otherwise. Locators survive filtering and sorting within a source version but are not a persisted compatibility promise across upstream schema migrations.

@@ -131,6 +131,7 @@ mod tests {
             evidence: EvidenceGrade::Semantic,
             timestamp: None,
             label: "turn".to_string(),
+            presentation: Default::default(),
             detail: json!({"payload": {"message": format!("{}needle{}", "a".repeat(100), "b".repeat(100))}}),
         };
         let hit = search_nodes(&[node], "needle").pop().unwrap();

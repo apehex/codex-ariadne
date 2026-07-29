@@ -1,34 +1,34 @@
 ---
 source: trace-tui/src/render_tests.rs
-expression: "render_app(&picker, 140, 30)"
+expression: "render_app(&mut picker, 140, 30)"
 ---
  Codex Trace  read-only · offline │ session 019d0000-0000-7000-8000-000000000101
 
-┌ ● Thread tree ───────────────────────────────┐┌   Ordered children ───────────────┐┌   Inspector ────────────────────────────────────────┐
-│▶ ▾ SES  session 019d0000-0000-7000-8000-00000││▶ THR  thread 019d0000-0000-7000-80││Session — session 019d0000-0000-7000-8000-           │
-│    ▸ THR  thread 019d0000-0000-7000-8000-0000││                                   ││000000000101                                         │
-│                                              ││                                   ││id: 019d0000-0000-7000-8000-000000000101             │
-│                                              ││                                   ││timestamp: 2026-07-25T00:00:00Z                      │
-│                                              ││                                   ││evidence: ordinary · reconstructed                   │
-│                                              ││                                   ││capabilities:                                        │
-│                                              ││                                   ││  ordinary transcript: yes                           │
-│                                              ││                                   ││  raw rollout records: yes                           │
-│                                              ││                                   ││  exact inference context: no                        │
-│                                              ││                                   ││  per-generation usage: no                           │
-│                                              ││                                   ││  runtime graph: no                                  │
-│                                              ││                                   ││  raw payloads: no                                   │
-│                                              ││                                   ││  compaction detail: no                              │
-│                                              ││                                   ││                                                     │
-│                                              ││                                   ││{                                                    │
-│                                              ││                                   ││  "archived": false,                                 │
-│                                              ││                                   ││  "capabilities": {                                  │
-│                                              ││                                   ││    "compaction_detail": false,                      │
-│                                              ││                                   ││    "exact_inference_context": false,                │
-│                                              ││                                   ││    "ordinary_transcript": true,                     │
-│                                              ││                                   ││    "per_generation_usage": false,                   │
-│                                              ││                                   ││    "raw_payloads": false,                           │
-│                                              ││                                   ││    "raw_rollout_records": true,                     │
-│                                              ││                                   ││    "runtime_graph": false                           │
-│                                              ││                                   ││  },                                                 │
-└──────────────────────────────────────────────┘└───────────────────────────────────┘└─────────────────────────────────────────────────────┘
- tree  Tab pane  jk move  h/Backspace parent  Enter open/raw  / search  n/N hits  d diagnostics  q quit
+┌ Records ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│  NAME                   KIND CLASS        STATUS    TIME                 SOURCE   EVIDENCE      PREVIEW                                  │
+│▶ thread 019d0000-0000-… THR  structure    —         2026-07-25T00:00:00Z ordinary semantic                                               │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+ 1/1 visible · 0 hidden · 0 columns omitted  jk move  Enter descend  i detail  Esc parent  / search  f filter  ? help  q quit

@@ -322,8 +322,16 @@ async fn exact_bundle_directory_discovers_rich_semantic_nodes() {
         .find(|node| node.locator.kind == TraceNodeKind::Thread)
         .unwrap();
     assert_eq!(
-        (thread.provenance, thread.evidence),
-        (TraceSourceKind::Rich, EvidenceGrade::Semantic)
+        (
+            thread.provenance,
+            thread.evidence,
+            thread.presentation.class,
+        ),
+        (
+            TraceSourceKind::Rich,
+            EvidenceGrade::Semantic,
+            TraceRecordClass::Structure,
+        )
     );
     let payload = trace
         .nodes
@@ -331,8 +339,16 @@ async fn exact_bundle_directory_discovers_rich_semantic_nodes() {
         .find(|node| node.locator.kind == TraceNodeKind::RawPayload)
         .unwrap();
     assert_eq!(
-        (payload.provenance, payload.evidence),
-        (TraceSourceKind::Rich, EvidenceGrade::Exact)
+        (
+            payload.provenance,
+            payload.evidence,
+            payload.presentation.class,
+        ),
+        (
+            TraceSourceKind::Rich,
+            EvidenceGrade::Exact,
+            TraceRecordClass::RawArtifact,
+        )
     );
 }
 

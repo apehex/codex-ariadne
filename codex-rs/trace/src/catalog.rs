@@ -234,6 +234,7 @@ impl TraceCatalog {
             .cloned()
             .collect::<Vec<_>>();
         let session_locator = TraceNodeLocator::new(session_id, TraceNodeKind::Session, session_id);
+        let session_detail = serde_json::to_value(&summary)?;
         nodes.insert(
             session_locator.clone(),
             TraceNode {
@@ -243,7 +244,11 @@ impl TraceCatalog {
                 evidence: EvidenceGrade::Reconstructed,
                 timestamp: summary.created_at.clone(),
                 label: format!("session {session_id}"),
-                detail: serde_json::to_value(&summary)?,
+                presentation: crate::TraceRecordPresentation::from_detail(
+                    TraceNodeKind::Session,
+                    &session_detail,
+                ),
+                detail: session_detail,
             },
         );
         for thread in &entry.ordinary {
@@ -297,6 +302,10 @@ impl TraceCatalog {
             )?;
             if let Some(session) = nodes.get_mut(&session_locator) {
                 session.detail = serde_json::to_value(&summary)?;
+                session.presentation = crate::TraceRecordPresentation::from_detail(
+                    TraceNodeKind::Session,
+                    &session.detail,
+                );
             }
         }
         let remaining_diagnostic_nodes = self
@@ -313,6 +322,7 @@ impl TraceCatalog {
                 TraceNodeKind::Diagnostic,
                 format!("diagnostic:{index}"),
             );
+            let detail = serde_json::to_value(diagnostic)?;
             nodes.insert(
                 locator.clone(),
                 TraceNode {
@@ -322,7 +332,11 @@ impl TraceCatalog {
                     evidence: diagnostic.evidence,
                     timestamp: None,
                     label: diagnostic.message.clone(),
-                    detail: serde_json::to_value(diagnostic)?,
+                    presentation: crate::TraceRecordPresentation::from_detail(
+                        TraceNodeKind::Diagnostic,
+                        &detail,
+                    ),
+                    detail,
                 },
             );
         }
@@ -351,6 +365,15 @@ async fn load_ordinary_thread(
         .filter(|_| parent_is_reachable(thread, ordinary_threads))
         .map(|id| ordinary_thread_locator(session_id, id))
         .unwrap_or_else(|| session_locator.clone());
+    let thread_label = format!("thread {}", thread.thread_id);
+    let thread_detail = serde_json::json!({
+        "thread_id": thread.thread_id,
+        "path": thread.path,
+        "cwd": thread.cwd,
+        "model_provider": thread.model_provider,
+        "archived": thread.archived,
+        "original_parent_thread_id": thread.parent_thread_id,
+    });
     nodes
         .entry(thread_locator.clone())
         .or_insert_with(|| TraceNode {
@@ -359,15 +382,12 @@ async fn load_ordinary_thread(
             provenance: TraceSourceKind::Ordinary,
             evidence: EvidenceGrade::Semantic,
             timestamp: Some(thread.timestamp.clone()),
-            label: format!("thread {}", thread.thread_id),
-            detail: serde_json::json!({
-                    "thread_id": thread.thread_id,
-                    "path": thread.path,
-                "cwd": thread.cwd,
-                "model_provider": thread.model_provider,
-                "archived": thread.archived,
-                "original_parent_thread_id": thread.parent_thread_id,
-            }),
+            label: thread_label.clone(),
+            presentation: crate::TraceRecordPresentation::from_detail(
+                TraceNodeKind::Thread,
+                &thread_detail,
+            ),
+            detail: thread_detail,
         });
 
     let mut reader = match codex_rollout::open_rollout_line_reader(&thread.path).await {
@@ -462,6 +482,7 @@ async fn load_ordinary_thread(
                     .and_then(serde_json::Value::as_str)
                     .map(str::to_owned),
                 label: label.to_string(),
+                presentation: crate::TraceRecordPresentation::from_detail(kind, &value),
                 detail: value,
             },
         );

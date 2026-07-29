@@ -14,6 +14,8 @@ let session = catalog.load_session(session_id).await?;
 
 `SessionTrace::index()` constructs a `TraceIndex` snapshot for routine locator, root, and child lookup. The index also exposes compact node positions for consumers that retain an immutable loaded trace. Rebuild it after inserting, removing, or reordering nodes or changing a node locator or parent.
 
+Each `TraceNode` carries a bounded `TraceRecordPresentation` for listing, styling, and visibility filters. `TraceNode::content_document()` extracts bounded semantic Markdown, text, JSON, or code without following a raw-payload reference; exact payload access remains explicitly lazy.
+
 The crate re-exports its public model from `src/model.rs`, trace index from `src/index.rs`, and contained payload reader from `src/payload.rs`.
 
 ## Source pipeline
@@ -33,6 +35,7 @@ Discovery is metadata-oriented and does not eagerly reduce every rich bundle. Pr
 | `src/catalog.rs` | Repository configuration, discovery, selection, ordinary projection, and source reconciliation |
 | `src/rich.rs` | Rich bundle reduction and normalized rich-node projection |
 | `src/model.rs` | Public catalog, node, locator, capability, evidence, limit, diagnostic, and search-result types |
+| `src/model_tests.rs` | Record classification, semantic content, newline, bound, and terminal-safety tests |
 | `src/index.rs` | Snapshot index for locator lookup, root and child traversal, and compact node positions |
 | `src/search.rs` | Bounded attributed semantic search |
 | `src/payload.rs` | Canonically contained, size-limited, terminal-safe payload reads |
