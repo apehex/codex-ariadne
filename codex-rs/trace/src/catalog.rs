@@ -69,15 +69,13 @@ impl TraceRepository {
 
     /// Discovers trace metadata without writing indexes or repairing source files.
     pub async fn discover(&self) -> TraceCatalog {
-        let mut diagnostics = Vec::new();
-        let mut threads = BTreeMap::<(String, String), OrdinaryThread>::new();
-        let mut ordinary_observations = Vec::new();
+        let mut catalog = CatalogAccumulator::default();
         for (root, archived) in &self.ordinary_roots {
             for path in discover_files(
                 root,
                 is_rollout_file,
                 self.limits.max_discovered_files_per_root,
-                &mut diagnostics,
+                catalog.diagnostics_mut(),
             )
             .await
             {
@@ -98,24 +96,9 @@ impl TraceRepository {
                             model_provider: meta.model_provider,
                             archived: *archived,
                         };
-                        let identity = (session_id, thread_id.clone());
-                        if let Some(previous) = threads.get(&identity)
-                            && !same_ordinary_observation(previous, &thread)
-                        {
-                            diagnostics.push(TraceDiagnostic {
-                                locator: None,
-                                path: Some(path.clone()),
-                                evidence: EvidenceGrade::Conflicting,
-                                message: format!(
-                                    "conflicting ordinary rollout for thread {thread_id}; retained separately from {}",
-                                    previous.path.display()
-                                ),
-                            });
-                        }
-                        threads.entry(identity).or_insert_with(|| thread.clone());
-                        ordinary_observations.push(thread);
+                        catalog.observe_ordinary(thread);
                     }
-                    Err(error) => diagnostics.push(TraceDiagnostic {
+                    Err(error) => catalog.record_diagnostic(TraceDiagnostic {
                         locator: None,
                         path: Some(path),
                         evidence: EvidenceGrade::Unavailable,
@@ -125,15 +108,6 @@ impl TraceRepository {
             }
         }
 
-        let mut entries = BTreeMap::<String, CatalogEntry>::new();
-        for thread in &ordinary_observations {
-            entries
-                .entry(thread.session_id.clone())
-                .or_default()
-                .ordinary
-                .push(thread.clone());
-        }
-
         let mut bundle_paths = self.rich_bundles.clone();
         for rich_root in &self.rich_roots {
             bundle_paths.extend(
@@ -141,7 +115,7 @@ impl TraceRepository {
                     rich_root,
                     is_bundle_manifest,
                     self.limits.max_discovered_files_per_root,
-                    &mut diagnostics,
+                    catalog.diagnostics_mut(),
                 )
                 .await
                 .into_iter()
@@ -152,63 +126,8 @@ impl TraceRepository {
         bundle_paths.dedup();
         for path in bundle_paths {
             match codex_rollout_trace::inspect_bundle(&path) {
-                Ok(manifest) => {
-                    if manifest.schema_version != codex_rollout_trace::TRACE_BUNDLE_SCHEMA_VERSION {
-                        diagnostics.push(TraceDiagnostic {
-                            locator: None,
-                            path: Some(path.clone()),
-                            evidence: EvidenceGrade::Unavailable,
-                            message: format!(
-                                "rich trace manifest schema {} differs from supported schema {}",
-                                manifest.schema_version,
-                                codex_rollout_trace::TRACE_BUNDLE_SCHEMA_VERSION
-                            ),
-                        });
-                    }
-                    let key = if entries.contains_key(&manifest.rollout_id) {
-                        manifest.rollout_id.clone()
-                    } else if entries.contains_key(&manifest.root_thread_id) {
-                        manifest.root_thread_id.clone()
-                    } else {
-                        manifest.rollout_id.clone()
-                    };
-                    let entry = entries.entry(key).or_default();
-                    if !entry.ordinary.is_empty()
-                        && entry
-                            .ordinary
-                            .iter()
-                            .all(|thread| thread.thread_id != manifest.root_thread_id)
-                    {
-                        diagnostics.push(TraceDiagnostic {
-                            locator: None,
-                            path: Some(path.clone()),
-                            evidence: EvidenceGrade::Conflicting,
-                            message: format!(
-                                "rich root {} conflicts with ordinary rollout root",
-                                manifest.root_thread_id
-                            ),
-                        });
-                    }
-                    let bundle = RichBundle {
-                        path: path.clone(),
-                        manifest,
-                    };
-                    if let Some(previous) = entry.rich.first()
-                        && previous.manifest != bundle.manifest
-                    {
-                        diagnostics.push(TraceDiagnostic {
-                            locator: None,
-                            path: Some(path.clone()),
-                            evidence: EvidenceGrade::Conflicting,
-                            message: format!(
-                                "conflicting rich bundle retained separately from {}",
-                                previous.path.display()
-                            ),
-                        });
-                    }
-                    entry.rich.push(bundle);
-                }
-                Err(error) => diagnostics.push(TraceDiagnostic {
+                Ok(manifest) => catalog.observe_rich(path, manifest),
+                Err(error) => catalog.record_diagnostic(TraceDiagnostic {
                     locator: None,
                     path: Some(path),
                     evidence: EvidenceGrade::Unavailable,
@@ -217,16 +136,127 @@ impl TraceRepository {
             }
         }
 
-        let mut sessions = entries
+        catalog.finish(self.limits)
+    }
+}
+
+/// Accumulates source observations and their discovery diagnostics.
+#[derive(Default)]
+struct CatalogAccumulator {
+    entries: BTreeMap<String, CatalogEntry>,
+    ordinary_identities: BTreeMap<(String, String), OrdinaryThread>,
+    diagnostics: Vec<TraceDiagnostic>,
+}
+
+impl CatalogAccumulator {
+    /// Exposes the shared diagnostic sink to bounded filesystem discovery.
+    fn diagnostics_mut(&mut self) -> &mut Vec<TraceDiagnostic> {
+        &mut self.diagnostics
+    }
+
+    /// Retains one ordinary observation and reports incompatible repeated identity.
+    fn observe_ordinary(&mut self, thread: OrdinaryThread) {
+        let identity = (thread.session_id.clone(), thread.thread_id.clone());
+        if let Some(previous) = self.ordinary_identities.get(&identity)
+            && !same_ordinary_observation(previous, &thread)
+        {
+            self.diagnostics.push(TraceDiagnostic {
+                locator: None,
+                path: Some(thread.path.clone()),
+                evidence: EvidenceGrade::Conflicting,
+                message: format!(
+                    "conflicting ordinary rollout for thread {}; retained separately from {}",
+                    thread.thread_id,
+                    previous.path.display()
+                ),
+            });
+        }
+        self.ordinary_identities
+            .entry(identity)
+            .or_insert_with(|| thread.clone());
+        self.entries
+            .entry(thread.session_id.clone())
+            .or_default()
+            .ordinary
+            .push(thread);
+    }
+
+    /// Retains one rich bundle under its compatible ordinary catalog identity.
+    fn observe_rich(&mut self, path: PathBuf, manifest: codex_rollout_trace::TraceBundleMetadata) {
+        if manifest.schema_version != codex_rollout_trace::TRACE_BUNDLE_SCHEMA_VERSION {
+            self.diagnostics.push(TraceDiagnostic {
+                locator: None,
+                path: Some(path.clone()),
+                evidence: EvidenceGrade::Unavailable,
+                message: format!(
+                    "rich trace manifest schema {} differs from supported schema {}",
+                    manifest.schema_version,
+                    codex_rollout_trace::TRACE_BUNDLE_SCHEMA_VERSION
+                ),
+            });
+        }
+        let key = if self.entries.contains_key(&manifest.rollout_id) {
+            manifest.rollout_id.clone()
+        } else if self.entries.contains_key(&manifest.root_thread_id) {
+            manifest.root_thread_id.clone()
+        } else {
+            manifest.rollout_id.clone()
+        };
+        let entry = self.entries.entry(key).or_default();
+        if !entry.ordinary.is_empty()
+            && entry
+                .ordinary
+                .iter()
+                .all(|thread| thread.thread_id != manifest.root_thread_id)
+        {
+            self.diagnostics.push(TraceDiagnostic {
+                locator: None,
+                path: Some(path.clone()),
+                evidence: EvidenceGrade::Conflicting,
+                message: format!(
+                    "rich root {} conflicts with ordinary rollout root",
+                    manifest.root_thread_id
+                ),
+            });
+        }
+        let bundle = RichBundle {
+            path: path.clone(),
+            manifest,
+        };
+        if let Some(previous) = entry.rich.first()
+            && previous.manifest != bundle.manifest
+        {
+            self.diagnostics.push(TraceDiagnostic {
+                locator: None,
+                path: Some(path),
+                evidence: EvidenceGrade::Conflicting,
+                message: format!(
+                    "conflicting rich bundle retained separately from {}",
+                    previous.path.display()
+                ),
+            });
+        }
+        entry.rich.push(bundle);
+    }
+
+    /// Adds one discovery problem without discarding usable observations.
+    fn record_diagnostic(&mut self, diagnostic: TraceDiagnostic) {
+        self.diagnostics.push(diagnostic);
+    }
+
+    /// Produces the public catalog after deterministic summary ordering.
+    fn finish(self, limits: TraceLimits) -> TraceCatalog {
+        let mut sessions = self
+            .entries
             .iter()
             .map(|(session_id, entry)| summarize(session_id, entry))
             .collect::<Vec<_>>();
         sessions.sort_by(|left, right| right.created_at.cmp(&left.created_at));
         TraceCatalog {
             sessions,
-            diagnostics,
-            entries,
-            limits: self.limits,
+            diagnostics: self.diagnostics,
+            entries: self.entries,
+            limits,
         }
     }
 }
@@ -274,12 +304,13 @@ impl TraceCatalog {
                 payloads: BTreeMap::new(),
             });
         }
+        let ordinary_topology = crate::ordinary::OrdinaryTopology::new(&entry.ordinary);
         for thread in &entry.ordinary {
             crate::ordinary::load_thread(
                 session_id,
                 thread,
                 &session_locator,
-                &entry.ordinary,
+                &ordinary_topology,
                 self.limits,
                 &mut graph,
             )
@@ -514,12 +545,7 @@ fn is_bundle_manifest(path: &Path) -> bool {
 }
 
 fn path_diagnostic(path: &Path, message: String) -> TraceDiagnostic {
-    TraceDiagnostic {
-        locator: None,
-        path: Some(path.to_path_buf()),
-        evidence: EvidenceGrade::Unavailable,
-        message,
-    }
+    TraceDiagnostic::unavailable_at(path, message)
 }
 
 fn diagnostic_belongs_to(diagnostic: &TraceDiagnostic, entry: &CatalogEntry) -> bool {

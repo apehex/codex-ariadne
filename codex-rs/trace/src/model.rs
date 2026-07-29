@@ -308,6 +308,18 @@ pub struct TraceDiagnostic {
     pub message: String,
 }
 
+impl TraceDiagnostic {
+    /// Creates an unavailable-evidence diagnostic associated with one source path.
+    pub(crate) fn unavailable_at(path: &std::path::Path, message: String) -> Self {
+        Self {
+            locator: None,
+            path: Some(path.to_path_buf()),
+            evidence: EvidenceGrade::Unavailable,
+            message,
+        }
+    }
+}
+
 /// Catalog row for one root session tree.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionSummary {

@@ -24,17 +24,83 @@ use crate::TraceNodeLocator;
 use crate::TraceSourceKind;
 use crate::model::OrdinaryThread;
 
+/// Precomputed ordinary-thread identity and containment relationships.
+pub(crate) struct OrdinaryTopology<'a> {
+    by_id: BTreeMap<&'a str, Vec<&'a OrdinaryThread>>,
+}
+
+impl<'a> OrdinaryTopology<'a> {
+    /// Indexes every retained observation without silently choosing a conflicting parent.
+    pub(crate) fn new(threads: &'a [OrdinaryThread]) -> Self {
+        let mut by_id = BTreeMap::<&str, Vec<&OrdinaryThread>>::new();
+        for thread in threads {
+            by_id
+                .entry(thread.thread_id.as_str())
+                .or_default()
+                .push(thread);
+        }
+        Self { by_id }
+    }
+
+    /// Resolves a same-session parent while rejecting gaps, conflicts, and cycles.
+    fn parent_id(&self, thread: &'a OrdinaryThread) -> Result<Option<&'a str>, String> {
+        let Some(parent_id) = thread.parent_thread_id.as_deref() else {
+            return Ok(None);
+        };
+        let mut next = Some(parent_id);
+        let mut seen = BTreeSet::new();
+        while let Some(id) = next {
+            if !seen.insert(id) {
+                return Err(format!(
+                    "parent cycle at {id}; attached thread {} to session {}",
+                    thread.thread_id, thread.session_id
+                ));
+            }
+            let Some(observations) = self.by_id.get(id) else {
+                return Err(format!(
+                    "parent rollout {id} is missing or belongs to another session; attached thread {} to session {}",
+                    thread.thread_id, thread.session_id
+                ));
+            };
+            let same_session = observations
+                .iter()
+                .copied()
+                .filter(|parent| parent.session_id == thread.session_id)
+                .collect::<Vec<_>>();
+            if same_session.is_empty() {
+                let observed_session = &observations[0].session_id;
+                return Err(format!(
+                    "parent rollout {id} belongs to session {observed_session}; attached thread {} to session {}",
+                    thread.thread_id, thread.session_id
+                ));
+            }
+            let parent_parent = same_session[0].parent_thread_id.as_deref();
+            if same_session
+                .iter()
+                .any(|parent| parent.parent_thread_id.as_deref() != parent_parent)
+            {
+                return Err(format!(
+                    "parent rollout {id} has conflicting containment observations; attached thread {} to session {}",
+                    thread.thread_id, thread.session_id
+                ));
+            }
+            next = parent_parent;
+        }
+        Ok(Some(parent_id))
+    }
+}
+
 /// Projects one ordinary thread and its bounded JSONL records.
 pub(crate) async fn load_thread(
     session_id: &str,
     thread: &OrdinaryThread,
     session_locator: &TraceNodeLocator,
-    ordinary_threads: &[OrdinaryThread],
+    topology: &OrdinaryTopology<'_>,
     limits: TraceLimits,
     graph: &mut TraceGraphBuilder,
 ) {
     let base_thread_locator = thread_locator(session_id, &thread.thread_id);
-    let parent = match valid_parent_id(thread, ordinary_threads) {
+    let parent = match topology.parent_id(thread) {
         Ok(Some(parent_id)) => thread_locator(session_id, parent_id),
         Ok(None) => session_locator.clone(),
         Err(message) => {
@@ -174,44 +240,6 @@ pub(crate) async fn load_thread(
     }
 }
 
-/// Resolves a same-session containment parent while rejecting gaps and cycles.
-fn valid_parent_id<'a>(
-    thread: &'a OrdinaryThread,
-    threads: &'a [OrdinaryThread],
-) -> Result<Option<&'a str>, String> {
-    let Some(parent_id) = thread.parent_thread_id.as_deref() else {
-        return Ok(None);
-    };
-    let by_id = threads
-        .iter()
-        .map(|thread| (thread.thread_id.as_str(), thread))
-        .collect::<BTreeMap<_, _>>();
-    let mut next = Some(parent_id);
-    let mut seen = BTreeSet::new();
-    while let Some(id) = next {
-        if !seen.insert(id) {
-            return Err(format!(
-                "parent cycle at {id}; attached thread {} to session {}",
-                thread.thread_id, thread.session_id
-            ));
-        }
-        let Some(parent) = by_id.get(id) else {
-            return Err(format!(
-                "parent rollout {id} is missing or belongs to another session; attached thread {} to session {}",
-                thread.thread_id, thread.session_id
-            ));
-        };
-        if parent.session_id != thread.session_id {
-            return Err(format!(
-                "parent rollout {id} belongs to session {}; attached thread {} to session {}",
-                parent.session_id, thread.thread_id, thread.session_id
-            ));
-        };
-        next = parent.parent_thread_id.as_deref();
-    }
-    Ok(Some(parent_id))
-}
-
 /// Converts an upstream RFC 3339 thread start into a sortable session-level position.
 fn thread_start_order(timestamp: &str) -> SiblingOrder {
     DateTime::parse_from_rfc3339(timestamp).map_or(SiblingOrder::Unspecified, |timestamp| {
@@ -247,12 +275,7 @@ fn thread_locator(session_id: &str, thread_id: &str) -> TraceNodeLocator {
 
 /// Builds a source-local non-fatal diagnostic.
 fn path_diagnostic(path: &Path, message: String) -> TraceDiagnostic {
-    TraceDiagnostic {
-        locator: None,
-        path: Some(path.to_path_buf()),
-        evidence: EvidenceGrade::Unavailable,
-        message,
-    }
+    TraceDiagnostic::unavailable_at(path, message)
 }
 
 /// One bounded rollout line, excluding its line terminator.
