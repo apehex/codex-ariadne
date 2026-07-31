@@ -16,17 +16,17 @@ Ordinary rollouts remain the broadly available source. Opt-in rollout-trace bund
 
 ```text
 ordinary rollouts ── codex-rollout ───────────┐
-                                               ├─ codex-trace ─ codex-trace-tui ─ codex trace
-rich bundles ─────── codex-rollout-trace ─────┘
-                             │
-                             └─ contained lazy payload reads
+                                               ├─ codex-trace ─ SessionTrace ─┬─ TraceIndex ─────────┐
+rich bundles ─────── codex-rollout-trace ─────┘                              └─ PresentationIndex ──┼─ codex-trace-tui ─ codex trace
+future live facts ───────────────────────────────────────────────────────────────────────▲         │
+contained lazy payload reads ─────────────────────────────────────────────────────────────────────┘
 ```
 
-[`codex-rs/trace/`](../codex-rs/trace/) owns discovery, source projection, reconciliation, provenance, capabilities, stable locators, diagnostics, bounds, semantic search, and safe raw-payload access.
+[`codex-rs/trace/`](../codex-rs/trace/) owns discovery, source projection, reconciliation, provenance, capabilities, stable locators, diagnostics, bounds, semantic search, safe raw-payload access, and the future renderer-neutral order, correlation, and presentation snapshots.
 
 [`codex-rs/trace-tui/`](../codex-rs/trace-tui/) owns Ratatui application state, background jobs, navigation, layout, and rendering. It consumes the trace model rather than reconstructing source semantics.
 
-The CLI owns argument parsing and launch. A future live `/trace` view should reuse both crates rather than create a second inspection model.
+The CLI owns argument parsing and launch. A future live `/trace` view reuses both crates and feeds typed live presentation facts into the same reduction instead of creating a second inspection model.
 
 ## Distribution and public demonstration
 
@@ -60,6 +60,20 @@ The catalog lists root sessions using bounded metadata without reducing every ri
 The normalized tree contains sessions, agent threads, turns, inference calls, conversation items, agent communication, tool and terminal activity, compactions, interaction edges, raw payload references, and diagnostics.
 
 Thread nesting expresses ownership; causal edges express information flow. These relationships must not be collapsed into one another. Stable viewer locators combine source identity with source-local object identity and remain stable across filtering and sorting within one source version.
+
+## Presentation projection
+
+The accepted [presentation-index contract](decisions/2026-07-31-trace-presentation-index-contract.md) adds a derived snapshot beside the structural index. `SessionTrace` remains the canonical normalized evidence, `TraceIndex` remains the containment and lookup index, and `PresentationIndex` owns renderer-neutral grouping, order bands, summaries, completeness, default visibility, and reversible links back to canonical locators.
+
+Every event admitted to grouped or expanded views has exactly one primary group. Secondary references may connect compactions, inference requests, terminal sessions, interactions, diagnostics, and raw artifacts without moving or duplicating their canonical evidence. Sessions, threads, turns, and inference containers remain available through structural navigation even when conversation views omit them.
+
+Order is source-typed and thread-local unless rich global sequence evidence establishes a cross-thread order. Ordinary ordinals, rich event sequences, structural positions, wall-clock timestamps, and stable tie-breakers remain distinct domains. Wall-clock time is display metadata, and deterministic linearization of incomparable source bands is labeled non-causal.
+
+Groups use durable correlation identities. Missing identifiers produce singleton or partial groups, never timestamp- or adjacency-based guesses. Higher-order groups such as exploration batches contain child group IDs rather than copying their nodes. Group summaries are bounded derived facts and never replace the evidence that supports them.
+
+Canonical evidence grade, group completeness, and live origin remain orthogonal. Batch and incremental construction must converge for completed facts; live-only state is labeled and may not be reconstructed from a persisted trace that lacks it.
+
+The presentation snapshot is bounded linearly by retained canonical nodes and admitted references, is built outside rendering, and contains no Ratatui, terminal-width, `HistoryCell`, app-server, authentication, or model-context types.
 
 ## Loading and responsiveness
 

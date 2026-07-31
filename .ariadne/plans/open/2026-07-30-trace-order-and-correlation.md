@@ -1,6 +1,6 @@
 # Trace Order And Correlation
 
-Updated: 2026-07-30
+Updated: 2026-07-31
 
 Status: open
 
@@ -12,7 +12,7 @@ Retain typed order and correlation facts in the loaded Ariadne trace model so pr
 
 Ordinary rollout records have per-thread ordinals or line order. Rich traces have global raw-event sequences, execution windows, call identifiers, producer references, and interaction edges. `TraceGraphBuilder` currently uses source order to sort siblings and then discards its private `SiblingOrder`; the final node vector is parent-bucketed and is not a global event timeline.
 
-This is Phase 1 and depends on the closed decisions from [Phase 0](2026-07-30-trace-presentation-architecture-contract.md). The open [quality-remediation plan](2026-07-28-trace-browser-quality-remediation.md) remains the baseline correctness and bounds gate.
+This is Phase 1 and depends on the closed decisions from [Phase 0](../closed/2026-07-30-trace-presentation-architecture-contract.md). It implements the order and correlation boundary of the accepted [presentation-index contract](../../decisions/2026-07-31-trace-presentation-index-contract.md). The open [quality-remediation plan](2026-07-28-trace-browser-quality-remediation.md) remains the baseline correctness and bounds gate.
 
 ## Scope
 

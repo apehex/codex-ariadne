@@ -1,6 +1,6 @@
 # Live Parent Trace Integration
 
-Updated: 2026-07-30
+Updated: 2026-07-31
 
 Status: open
 
@@ -10,7 +10,7 @@ Produce an opt-in parent-compatible integration in which `/trace` and the config
 
 ## Context
 
-This is Phase 7 and depends on the demonstrated semantic parity from [Phase 6](2026-07-30-codex-transcript-parity.md).
+This is Phase 7 and depends on the demonstrated semantic parity from [Phase 6](2026-07-30-codex-transcript-parity.md). Its live adapter and parent boundary must conform to the accepted [presentation-index contract](../../decisions/2026-07-31-trace-presentation-index-contract.md).
 
 The goal is a locally working and reviewable compatibility candidate. Upstream acceptance, default enablement, and product replacement are external outcomes and are not closure requirements.
 

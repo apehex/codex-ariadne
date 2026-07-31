@@ -1,6 +1,6 @@
 # Credible Historical Trace Browser
 
-Updated: 2026-07-30
+Updated: 2026-07-31
 
 Status: closed; superseded by the quality-remediation and phased-presentation plans
 
@@ -126,7 +126,7 @@ This plan closed on 2026-07-30 as a historical implementation receipt rather tha
 
 The [open quality-remediation plan](../open/2026-07-28-trace-browser-quality-remediation.md) owns the remaining correctness, resource-bound, lifecycle, documentation, compatibility, test-depth, CI, and public-prototype gates for the current baseline.
 
-The phased presentation program beginning with the [architecture contract](../open/2026-07-30-trace-presentation-architecture-contract.md) owns the future order, correlation, grouping, lens, surface, transcript-parity, and parent-integration work. Its [parent-compatible candidate phase](../open/2026-07-30-parent-compatible-transcript-candidate.md) treats local compatibility evidence as its closure condition; upstream adoption remains an external outcome.
+The phased presentation program beginning with the [closed architecture contract](2026-07-30-trace-presentation-architecture-contract.md) owns the future order, correlation, grouping, lens, surface, transcript-parity, and parent-integration work. Its [parent-compatible candidate phase](../open/2026-07-30-parent-compatible-transcript-candidate.md) treats local compatibility evidence as its closure condition; upstream adoption remains an external outcome.
 
 The implementation and validation evidence above remains valid historical evidence where it describes the code at that time. Obsolete pane, fold, expansion, and publication requirements are not carried forward.
 

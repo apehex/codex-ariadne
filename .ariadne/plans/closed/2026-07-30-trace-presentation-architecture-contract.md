@@ -1,8 +1,8 @@
 # Trace Presentation Architecture Contract
 
-Updated: 2026-07-30
+Updated: 2026-07-31
 
-Status: open
+Status: closed
 
 ## Objective
 
@@ -65,3 +65,41 @@ This phase may update `codex-rs/trace/DESIGN.md` and `codex-rs/trace-tui/DESIGN.
 Close this plan after recording the accepted decisions, updating the cross-crate and module designs, linking every successor phase, and listing unresolved choices that must block implementation rather than be guessed.
 
 No Rust implementation, push, release, external proposal, or upstream submission is authorized by this phase.
+
+## Implementation Record
+
+Phase 0 completed on 2026-07-31 as a documentation-and-decisions phase.
+
+The accepted [Materialized Trace Presentation Index decision](../../decisions/2026-07-31-trace-presentation-index-contract.md) defines:
+
+- exclusive ownership of canonical evidence, structural lookup, typed order and correlation, presentation reduction, browser behavior, and parent integration;
+- primary, reference-only, and structural-only presentation dispositions;
+- orthogonal evidence grade, completeness, and persisted or live origin;
+- ordinary ordinal, rich sequence, structural, timestamp, and deterministic tie-break domains;
+- explicit unordered cross-source bands and the prohibition on timestamp-derived causality;
+- stable singleton, correlated lifecycle, and higher-order batch identities;
+- initial group families, member roles, conservative aggregate status, nesting, summaries, and default visibility;
+- collapsed, expanded, entered-group, structural, thread, and structured-value navigation order;
+- exact group, membership, reference, nesting, diagnostic, summary, preview, and structured-value bounds;
+- batch and incremental equivalence and a renderer-neutral parent boundary;
+- degradation and stop rules for facts that later phases cannot support without guessing.
+
+The decision includes worked examples for interleaved background tools, exploration batches, agent waits, compaction, missing endpoints, repeated and conflicting observations, concurrent child threads, and regressing timestamps.
+
+The cross-crate [Ariadne design](../../DESIGN.md), [`codex-trace` design](../../../codex-rs/trace/DESIGN.md), and [`codex-trace-tui` design](../../../codex-rs/trace-tui/DESIGN.md) now record the accepted layering and module boundaries.
+
+Every successor plan links to the accepted decision and names the part of the contract it implements. Phase 1 is the next executable phase.
+
+## Residual And Blocking Conditions
+
+No unresolved architecture choice blocks Phase 1.
+
+Later phases must stop their affected movement rather than infer missing order, correlation, batching, persisted live state, canonical JSON-value nodes, or a new upstream observability surface. The exact stop conditions are recorded in the accepted decision.
+
+Parent transcript family parity, exact exploration flush rules, the live event adapter, and the eventual upstream integration diff remain deliberately owned by Phases 3, 6, 7, and 8 rather than being guessed in Phase 0.
+
+## Validation Record
+
+Documentation validation checked required plan sections, successor links, local Markdown targets, unfolded semantic-line formatting, trailing whitespace, and `git diff --check`.
+
+No Rust source, persisted format, recorder, app-server API, parent-TUI behavior, push, release, external proposal, or upstream submission changed in this phase.

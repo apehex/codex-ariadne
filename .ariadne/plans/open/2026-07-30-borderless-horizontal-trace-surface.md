@@ -1,6 +1,6 @@
 # Borderless Horizontal Trace Surface
 
-Updated: 2026-07-30
+Updated: 2026-07-31
 
 Status: open
 
@@ -12,7 +12,7 @@ Apply a borderless, full-body, horizontally navigable visual language to every s
 
 This is Phase 5 and supersedes the closed [Borderless Horizontal Trace Overview](../closed/2026-07-29-borderless-horizontal-trace-overview.md). The earlier plan targeted ungrouped record rows; this plan retains its useful canvas, footer, Unicode, bounds, and shortcut requirements while applying them to groups, events, trace nodes, and structured values.
 
-This phase depends on [Phase 4](2026-07-30-trace-browser-lenses-and-structured-navigation.md).
+This phase depends on [Phase 4](2026-07-30-trace-browser-lenses-and-structured-navigation.md) and must preserve the renderer-neutral ownership, effective-visibility, and viewport bounds of the accepted [presentation-index contract](../../decisions/2026-07-31-trace-presentation-index-contract.md).
 
 ## Scope
 

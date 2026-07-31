@@ -2,7 +2,7 @@
 
 ## Responsibility
 
-`codex-trace` converts persisted ordinary rollouts and rich rollout-trace bundles into one read-only inspection model. It owns source mechanics and semantic normalization; consumers own presentation.
+`codex-trace` converts persisted ordinary rollouts and rich rollout-trace bundles into one read-only inspection model. It owns source mechanics, semantic normalization, and renderer-neutral presentation reduction; consumers own terminal presentation and interaction.
 
 The fork-wide evidence grades, product boundary, privacy rules, and crate layering are defined in [`.ariadne/DESIGN.md`](../../.ariadne/DESIGN.md).
 
@@ -59,6 +59,22 @@ The selected trace is retained as a public node vector. `TraceIndex` provides a 
 The index is deliberately not embedded in `SessionTrace`: its public nodes and their structural fields remain mutable for compatibility, so a hidden cache could silently become stale. Consumers build one index per loaded session and must rebuild it after inserting, removing, or reordering nodes or changing a locator or parent. Existing `SessionTrace` lookup methods retain their signatures and scan behavior for compatibility; routine browser navigation should use `TraceIndex`.
 
 Rich replay is selected-root lazy but the reducer is synchronous once invoked. Cooperative cancellation inside an already-running reducer remains a hardening gap.
+
+## Presentation index boundary
+
+The accepted [presentation-index contract](../../.ariadne/decisions/2026-07-31-trace-presentation-index-contract.md) defines a future renderer-neutral `PresentationIndex` as a second immutable snapshot over one loaded `SessionTrace`. It does not extend `TraceIndex` or change canonical structural parents.
+
+The presentation layer in this crate will own typed source-order and correlation facts, primary group membership, secondary references, higher-order child groups, order bands, aggregate metadata, completeness, origin, visibility defaults, and bounded derived diagnostics. It will retain canonical node positions or locators rather than clone complete detail values or raw payloads.
+
+Canonical order is a partial order. Ordinary ordinals and rich raw-event sequences retain their source meaning; stable correlations align equivalent observations; incomparable cross-source intervals remain explicitly unordered; and wall-clock timestamps never determine event position. Session-wide synchronization is available only when rich global sequence evidence supports it.
+
+Every primary presentable event belongs to exactly one primary group. Structural containers and raw artifacts may remain structural-only or reference-only, and every retained node stays reachable through `TraceIndex`. Missing correlation yields a singleton or partial group rather than a proximity inference.
+
+The default structural limits are derived from the retained node count `N`: at most `2N` groups, `3N` direct membership entries, `4N` secondary references with at most 4,096 per group, nesting depth 4, 4 KiB per free-form summary, and 16 MiB total summary text. Presentation diagnostics, previews, and structured-value navigation use the additional exact caps in the accepted decision.
+
+Construction belongs in selected-session loading or explicit incremental live reduction and must remain `O(N + R)` in admitted nodes, memberships, and references. Rendering-facing queries must not scan the complete trace, parse arbitrary node detail, or open raw payloads.
+
+The presentation types contain no Ratatui lines, styles, widths, wrapping, key bindings, overlays, parent `HistoryCell`s, or app-server clients. Batch and incremental reduction of the same completed typed facts must produce deeply equal snapshots except for explicitly transient live state.
 
 ## Search
 

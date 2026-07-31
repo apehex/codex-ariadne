@@ -8,7 +8,7 @@ The first historical `codex trace` browser and its ordinary, rich, and merged tr
 
 The accepted presentation program is materialized as separate open plans so each data, interaction, visual, and integration boundary can be reviewed independently:
 
-1. [Phase 0: Trace Presentation Architecture Contract](plans/open/2026-07-30-trace-presentation-architecture-contract.md) freezes evidence, ordering, grouping, view, bounds, and integration decisions.
+1. [Phase 0: Trace Presentation Architecture Contract](plans/closed/2026-07-30-trace-presentation-architecture-contract.md) froze evidence, ordering, grouping, view, bounds, and integration decisions in the accepted [presentation-index contract](decisions/2026-07-31-trace-presentation-index-contract.md).
 2. [Phase 1: Trace Order And Correlation](plans/open/2026-07-30-trace-order-and-correlation.md) retains typed source-order and correlation facts.
 3. [Phase 2: Static Trace Presentation Index](plans/open/2026-07-30-static-trace-presentation-index.md) materializes the minimal renderer-neutral partition.
 4. [Phase 3: Trace Grouping Policies](plans/open/2026-07-30-trace-grouping-policies.md) implements deterministic lifecycle, agent, compaction, and higher-order grouping.
@@ -18,7 +18,7 @@ The accepted presentation program is materialized as separate open plans so each
 8. [Phase 7: Live Parent Trace Integration](plans/open/2026-07-30-live-parent-trace-integration.md) adds an opt-in `/trace` and transcript-shortcut integration.
 9. [Phase 8: Parent-Compatible Transcript Candidate](plans/open/2026-07-30-parent-compatible-transcript-candidate.md) prepares a locally maintainable replacement candidate.
 
-The open plan for each phase is the execution authority for that phase; this roadmap is not.
+The open plan for each remaining phase is the execution authority for that phase; this roadmap is not. Closed phases retain their accepted decisions and validation records.
 
 Phases 7 and 8 close on local, reproducible compatibility candidates with an intact upstream fallback. Upstream interest, review, merge, release, default enablement, and eventual transcript replacement are external outcomes. Ariadne may maintain the candidate as upstream evolves without representing upstream adoption as completed.
 

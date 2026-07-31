@@ -20,6 +20,8 @@ The picker owns precomputed normalized labels, cached query matches, selection, 
 
 Every browser instance receives a unique epoch. Background session and payload results carry their root-session identity, while search, detail, and payload work is admitted through latest-request state containing the browser epoch, request generation, and complete view key. Results replace state only when all three remain current, including when the same session is reloaded into a replacement browser. Cancellation, invalidation, or failure returns to the previous stable screen and exposes an error without installing a partial session.
 
+The accepted successor architecture is defined by the [presentation-index contract](../../.ariadne/decisions/2026-07-31-trace-presentation-index-contract.md). Once its implementation phases land, the browser will consume one immutable `PresentationIndex` beside `TraceIndex`; it will not derive groups, order, completeness, or summaries from rendered rows.
+
 ## Event loop
 
 The terminal loop polls completed jobs, draws current stable state, reads an input event, and converts that event into an `AppAction`. Discovery, selected-root loading, trace-index construction, initial browser-state construction, and payload reads run in spawned jobs.
@@ -46,6 +48,10 @@ The later removal of the overview border, shared horizontal scrolling, progressi
 
 Navigation is locator-based so filtering and sorting do not invalidate identity. Enter moves to a child container or opens leaf detail; `i` opens any record; back closes detail or restores the exact parent selection and viewport. There is no fold, expansion, pane, or disclosure state.
 
+The successor navigation model generalizes a location to a thread, collapsed group timeline, expanded event timeline, entered group, canonical structural container, trace node, or browser-local structured value. Every descent frame stores its lens, locator or group ID, selection, viewport, and applicable horizontal state. Group identity and canonical locator remain distinct.
+
+Collapsed conversation order follows group anchors. Expanded event order follows canonical order bands and annotates non-contiguous group membership. Entering a group shows its direct members and child groups in canonical chronology. Structural navigation continues to expose every retained node, including records hidden by default from conversation views.
+
 Visible search runs over the enabled semantic classes, while all-record search may temporarily reveal one hidden result without mutating the filter. Submitted searches run in generation-tagged background jobs over shared immutable trace/index snapshots; an edited, cancelled, or superseded query cannot install a stale result. Moving between attributed hits selects their locators and exposes the matching field and snippet. Raw payload search is not part of the current state model.
 
 ## Rendering and performance contract
@@ -57,6 +63,10 @@ The browser builds one `TraceIndex` with its selected session and retains only t
 The detail cache is keyed by locator, width, content mode, and payload generation. Semantic extraction and host rendering run in generation-tagged background jobs over shared immutable trace/index snapshots, so resizing or changing modes cannot install stale work. Semantic detail is capped at 64 KiB and discloses truncation; loaded raw payloads remain bounded by the source reader. A deterministic 100,000-node profile measures current-level construction, return, and warm navigation without expansion-specific state.
 
 Do not solve a rendering freeze by dropping provenance, truncating without disclosure, eagerly loading raw payloads, or hiding malformed nodes.
+
+Presentation-index construction is selected-session or explicit live-update work, never frame work. The TUI consumes bounded typed summaries and canonical content references and applies effective visibility through lens and filter state. It may temporarily reveal hidden search hits without mutating presentation defaults.
+
+The same renderer-neutral snapshot is suitable for the standalone browser and a future parent adapter. Parent palette, Markdown, syntax, terminal lifecycle, command dispatch, and composer restoration remain renderer or adapter responsibilities; parent `HistoryCell` types are a parity oracle, not a dependency of `codex-trace-tui`.
 
 ## Detail modes
 

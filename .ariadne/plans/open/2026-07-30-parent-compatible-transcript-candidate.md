@@ -1,6 +1,6 @@
 # Parent-Compatible Transcript Candidate
 
-Updated: 2026-07-30
+Updated: 2026-07-31
 
 Status: open
 
@@ -10,7 +10,7 @@ Prepare and maintain a minimal parent-compatible candidate showing that Ariadne 
 
 ## Context
 
-This is Phase 8 and depends on the working opt-in integration from [Phase 7](2026-07-30-live-parent-trace-integration.md).
+This is Phase 8 and depends on the working opt-in integration from [Phase 7](2026-07-30-live-parent-trace-integration.md). Candidate extraction must preserve the ownership and upstream-separation rules of the accepted [presentation-index contract](../../decisions/2026-07-31-trace-presentation-index-contract.md).
 
 Ariadne can complete the engineering candidate locally and update it as upstream evolves. Actual replacement of the upstream transcript depends on upstream product interest, review, and acceptance; those outcomes are outside this plan's authority and closure criteria.
 
