@@ -1,6 +1,6 @@
 # Structure-Derived Conversation Fixture
 
-Updated: 2026-07-29
+Updated: 2026-07-30
 
 Status: open
 
@@ -26,11 +26,13 @@ This plan introduces a narrow permitted category for the quality-remediation wor
 
 ## Relationship To Existing Plans
 
-This plan supports Movement 4 of `.ariadne/plans/open/2026-07-28-trace-browser-quality-remediation.md` by providing a complex public fixture for rich projection, navigation, lifecycle, presentation, search, and offline/read-only tests.
+This plan supports Movement 4 of the [quality-remediation plan](2026-07-28-trace-browser-quality-remediation.md) by providing a complex public fixture for rich projection, navigation, lifecycle, presentation, search, and offline/read-only tests.
+
+The fixture is also shared evidence for [Phase 1 order and correlation](2026-07-30-trace-order-and-correlation.md), the [Phase 2 presentation index](2026-07-30-static-trace-presentation-index.md), [Phase 3 grouping policies](2026-07-30-trace-grouping-policies.md), [Phase 4 browser lenses](2026-07-30-trace-browser-lenses-and-structured-navigation.md), and [Phase 6 transcript parity](2026-07-30-codex-transcript-parity.md).
 
 It does not replace the deterministic hand-authored demo, exact-boundary unit fixtures, malformed-input fixtures, or platform containment fixtures required by the quality-remediation plan.
 
-It does not expand authority to implement live `/trace`, change recording or protocol formats, publish a release, push commits, or ingest other real conversations.
+It does not expand authority to implement the Phase 7 or 8 parent integration, change recording or protocol formats, publish a release, push commits, or ingest other real conversations.
 
 The existing quality-remediation plan must be amended during implementation to record this fixture category and its completed safety evidence before the fixture is used as closure evidence.
 
@@ -49,8 +51,9 @@ Do not claim that the fixture reproduces the conversation's semantics. Describe 
 ### Retained Allowlist
 
 - Event variant or normalized node kind.
-- Stable relative order within the selected trace.
+- Stable source-local order facts within the selected trace, including interleaving that separates correlated lifecycle members.
 - Parent-child and cross-thread relationship types.
+- Correlation topology needed to pair tool lifecycle, agent interaction, compaction, and producer/result evidence, without retaining source identifiers.
 - Thread, turn, message, inference, tool, compaction, diagnostic, and terminal-state boundaries.
 - Role and channel enums.
 - Tool names only when they are public Codex tool identifiers; unknown or extension-specific names become deterministic generic tool names.
@@ -139,7 +142,9 @@ Exit evidence:
 ### Movement 4: Integrate The Fixture With Trace Tests
 
 - Add focused reducer and trace-model tests over the committed fixture's turns, messages, tools, delegation, compaction, lifecycle, diagnostics, and relationships.
+- Add whole-object presentation-index tests for canonical event order, non-contiguous group membership, exploration batching, partial lifecycle groups, secondary references, and batch-versus-incremental equivalence.
 - Add trace-TUI state tests and reviewed snapshots for single-level navigation, role stripes, search, hidden-result reveal, Rendered/Text/Raw modes, multiline restoration, Unicode, terminal-control neutralization, truncation, failure, interruption, and narrow and wide layouts.
+- Add lens and parity tests for collapsed groups, expanded events, entered-group members, structural topology, child threads, structured JSON values, and the supported Codex transcript families.
 - Add an automated pseudo-terminal test that opens the fixture through the supported CLI, navigates, exits, and verifies byte-for-byte fixture preservation with network and credential access unavailable.
 - Keep exact-boundary and malformed-input tests separate rather than mutating the realistic fixture into an adversarial catch-all.
 - Update Bazel test data declarations when the fixture is accessed as a source-tree resource.
@@ -172,6 +177,7 @@ Exit evidence:
 - Automated leakage tests cover every prohibited source category, and a human review approves the final fixture.
 - The authoritative reducer and normal `codex trace --bundle` path accept the bundle.
 - Deep model, TUI, snapshot, and pseudo-terminal tests use the fixture while exact-boundary and malformed-input coverage remains separate.
+- The fixture exercises group-relevant interleaving and correlation while the generated fixture remains canonical source evidence; derived group assignments are rebuilt and verified by tests rather than committed as source truth.
 - Source fixture bytes remain unchanged during every offline browser run.
 - CI transforms no private data and publishes no source-derived intermediate.
 - The fixture fingerprint, transformation version, validation commands, and platform results are recorded for the exact candidate.

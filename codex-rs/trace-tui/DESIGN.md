@@ -40,7 +40,7 @@ One data-driven column plan owns metadata headers, widths, omission priorities, 
 
 Every row passes through the injected `TraceVisualRenderer`. The parent Codex TUI adapter reuses its terminal palette, message backgrounds, Markdown renderer, and syntax highlighter, while the standalone fallback remains deterministic and plain. Role and type remain visible in text so color is never the sole distinction.
 
-The later removal of the overview border, shared horizontal scrolling, progressively appended bounded content, and footer mode placement are specified in [the open borderless overview plan](../../.ariadne/plans/open/2026-07-29-borderless-horizontal-trace-overview.md). They are not part of the current rendering contract until that plan's interaction and configuration decisions are resolved.
+The later removal of the overview border, shared horizontal scrolling, progressively appended bounded content, and footer mode placement are specified in [Phase 5, the open borderless-surface plan](../../.ariadne/plans/open/2026-07-30-borderless-horizontal-trace-surface.md). They are not part of the current rendering contract until the preceding presentation-index, grouping, and lens phases establish the rendered units and that plan resolves its interaction and configuration decisions.
 
 ## Navigation
 

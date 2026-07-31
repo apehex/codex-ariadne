@@ -1,8 +1,8 @@
 # Borderless Horizontal Trace Overview
 
-Updated: 2026-07-29
+Updated: 2026-07-30
 
-Status: open
+Status: closed; superseded by the phased borderless-surface plan
 
 ## Objective
 
@@ -12,7 +12,7 @@ This is a subsequent UI/UX phase. The internal factorization completed on 2026-0
 
 ## Context
 
-The [closed single-panel plan](../closed/2026-07-28-single-panel-trace-browser.md) replaced folding and split panes with one-level-at-a-time navigation. The [quality remediation plan](2026-07-28-trace-browser-quality-remediation.md) remains the correctness, bounds, lifecycle, documentation, and compatibility gate. This plan owns only the next overview presentation and navigation changes.
+The [closed single-panel plan](2026-07-28-single-panel-trace-browser.md) replaced folding and split panes with one-level-at-a-time navigation. The [quality remediation plan](../open/2026-07-28-trace-browser-quality-remediation.md) remains the correctness, bounds, lifecycle, documentation, and compatibility gate. This plan owns only the next overview presentation and navigation changes.
 
 The current browser encloses the record list in a bordered block, fits each row to the terminal width, and progressively drops configured metadata columns and preview content as space contracts. That behavior is safe and responsive, but it prevents the overview from using the complete terminal width and makes a wide record impossible to inspect without entering detail.
 
@@ -90,3 +90,13 @@ Document the shortcuts in help and snapshot the key-hint and mode-information la
 Close this plan only after recording the Movement 0 decisions, the final shortcut and configuration surface, structural performance evidence, reviewed snapshot paths, exact local validation commands and results, and any residual navigation or accessibility work.
 
 Closing this plan does not close the quality remediation plan and does not authorize a push, tag, release, live `/trace` integration, or modification of upstream-owned TUI modules.
+
+## Supersession Record
+
+This plan closed on 2026-07-30 without claiming implementation under its original ungrouped-row model.
+
+Its useful decisions and acceptance requirements for the shared horizontal canvas, footer placement, Unicode display width, bounded content, navigation shortcuts, snapshots, and structural performance were transferred to the [Borderless Horizontal Trace Surface](../open/2026-07-30-borderless-horizontal-trace-surface.md).
+
+The replacement is Phase 5 of the presentation program and depends on the earlier order, presentation-index, grouping-policy, and browser-lens phases. That dependency changes the unit rendered by the surface from an assumed record row to a lens-provided group, event, trace node, or structured value.
+
+No implementation evidence, validation result, push, tag, release, or upstream integration is claimed by this closure.

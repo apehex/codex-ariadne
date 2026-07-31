@@ -1,8 +1,8 @@
 # Credible Historical Trace Browser
 
-Updated: 2026-07-28
+Updated: 2026-07-30
 
-Status: open
+Status: closed; superseded by the quality-remediation and phased-presentation plans
 
 ## Objective
 
@@ -118,4 +118,16 @@ The local engineering acceptance criteria are satisfied. The plan remains open b
 
 ## Successor UI plan
 
-The [closed single-panel plan](../closed/2026-07-28-single-panel-trace-browser.md) supersedes this plan's three-pane, flattened-tree, fold/expand, and expansion/collapse performance requirements. The implementation receipt above remains historical evidence; correctness, privacy, offline/read-only, compatibility, CI, and public-prototype gates remain active.
+The [closed single-panel plan](2026-07-28-single-panel-trace-browser.md) supersedes this plan's three-pane, flattened-tree, fold/expand, and expansion/collapse performance requirements. The implementation receipt above remains historical evidence; correctness, privacy, offline/read-only, compatibility, CI, and public-prototype gates remain active.
+
+## Supersession Record
+
+This plan closed on 2026-07-30 as a historical implementation receipt rather than as a claim that every original publication outcome occurred.
+
+The [open quality-remediation plan](../open/2026-07-28-trace-browser-quality-remediation.md) owns the remaining correctness, resource-bound, lifecycle, documentation, compatibility, test-depth, CI, and public-prototype gates for the current baseline.
+
+The phased presentation program beginning with the [architecture contract](../open/2026-07-30-trace-presentation-architecture-contract.md) owns the future order, correlation, grouping, lens, surface, transcript-parity, and parent-integration work. Its [parent-compatible candidate phase](../open/2026-07-30-parent-compatible-transcript-candidate.md) treats local compatibility evidence as its closure condition; upstream adoption remains an external outcome.
+
+The implementation and validation evidence above remains valid historical evidence where it describes the code at that time. Obsolete pane, fold, expansion, and publication requirements are not carried forward.
+
+No push, tag, release, repository-setting change, or external publication is claimed by this closure.

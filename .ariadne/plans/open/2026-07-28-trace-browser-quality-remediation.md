@@ -1,6 +1,6 @@
 # Trace Browser Quality Remediation
 
-Updated: 2026-07-29
+Updated: 2026-07-30
 
 Status: open
 
@@ -21,7 +21,7 @@ Completion means another operator can reproduce the evidence below without using
 
 The quality review was performed against `.ariadne/doctrine/quality.md`, the root `AGENTS.md`, and the local design contracts in `codex-rs/trace/DESIGN.md` and `codex-rs/trace-tui/DESIGN.md`. It found no model-visible context mutation, app-server API change, configuration compatibility change, or rollout-resume regression. Those surfaces must remain outside this remediation unless a separate accepted plan expands the scope.
 
-The existing `.ariadne/plans/open/2026-07-28-credible-historical-trace-browser.md` records useful implementation and performance evidence, but it remains open and does not waive the findings below. The [closed single-panel plan](../closed/2026-07-28-single-panel-trace-browser.md) records the completed UI redesign and transfers its residual gates here. This plan is the successor quality gate for that candidate. Do not close it or repeat its public-readiness claims until this plan's correctness, responsiveness, compatibility, and CI evidence is recorded.
+The [closed credible-browser plan](../closed/2026-07-28-credible-historical-trace-browser.md) preserves useful implementation and performance evidence as a historical receipt. The [closed single-panel plan](../closed/2026-07-28-single-panel-trace-browser.md) records the completed UI redesign and transfers its residual gates here. This plan is the successor quality gate for that candidate. Do not close it or repeat its public-readiness claims until this plan's correctness, responsiveness, compatibility, and CI evidence is recorded.
 
 The current local baseline is:
 
@@ -36,7 +36,7 @@ The post-single-panel audit resolved the obsolete fold/pane architecture, synchr
 
 The 2026-07-29 internal factorization added a precomputed ordinary-session topology, centralized catalog accumulation, rich projection assembly, browser-scoped request epochs, reusable latest-request and bounded-selection primitives, a data-driven overview column plan, and distinct terminal-safe single-line and multiline text policies. The focused suites now pass 38 `codex-trace` tests and 24 `codex-trace-tui` tests, with one ignored deterministic performance profile. These changes reduce repeated interpretation and duplicated state arithmetic without changing persisted formats or upstream-owned Codex modules.
 
-The proposed borderless, horizontally scrollable overview is intentionally deferred to [its own open plan](2026-07-29-borderless-horizontal-trace-overview.md). This quality plan supplies its bounds, lifecycle, documentation, snapshot, and compatibility gates but does not treat that visual redesign as remediation already completed.
+The proposed borderless, horizontally scrollable surface is Phase 5 of the [phased presentation program](2026-07-30-trace-presentation-architecture-contract.md) and is specified by the [open borderless-surface plan](2026-07-30-borderless-horizontal-trace-surface.md). This quality plan supplies baseline bounds, lifecycle, documentation, snapshot, and compatibility gates but does not treat any later presentation phase as remediation already completed.
 
 Existing evidence worth preserving includes focused `TraceIndex` ordering and rebuild tests; ordinary tree, orphan, cycle, malformed-rich, root-conflict, lazy-discovery, and basic payload-containment coverage; semantic rendering, UTF-8 truncation, and terminal-control tests; and baseline single-panel snapshots and state tests for descent, filtering, search scopes, hidden-hit reveal, stale-result rejection, help, and lazy payload failure.
 
@@ -285,10 +285,12 @@ Close this plan only after recording:
 - deterministic fixture fingerprints, performance job metadata, and results;
 - any rejected approach, residual gap, or successor plan.
 
-The closeout must also update the residual gates in `.ariadne/plans/open/2026-07-28-credible-historical-trace-browser.md`. Do not close this plan merely because implementation exists locally, a timing target passes once, or a release note asserts readiness. No push, tag, release, repository-setting change, or external publication is authorized by this plan.
+The closeout must record any residual public-prototype gates in its own closure and in `.ariadne/ROADMAP.md`; do not reopen or rewrite the closed credible-browser receipt as though its historical evidence were a current acceptance result. Do not close this plan merely because implementation exists locally, a timing target passes once, or a release note asserts readiness. No push, tag, release, repository-setting change, or external publication is authorized by this plan.
 
 ## Successor UI coordination
 
 The [closed single-panel plan](../closed/2026-07-28-single-panel-trace-browser.md) records completion of the pane, fold, presentation, and single-depth redesign. This plan retains authority over source correctness, evidence preservation, bounds, containment, asynchronous lifecycle, picker and search responsiveness, test depth, documentation coverage, compatibility, reviewable staging, and focused CI. All navigation requirements now mean single-level descent and return with current-level viewport restoration; obsolete folding and child-pane behavior must not be reintroduced.
 
-The [borderless horizontal overview plan](2026-07-29-borderless-horizontal-trace-overview.md) owns the later removal of the overview border, a shared horizontal viewport, progressively appended bounded content, footer mode placement, and horizontal shortcuts. Its implementation must build on the factored column, text, selection, and request primitives instead of restoring row wrapping or coupling horizontal state to trace topology.
+The later presentation program is partitioned into the [architecture contract](2026-07-30-trace-presentation-architecture-contract.md), [order and correlation](2026-07-30-trace-order-and-correlation.md), [static presentation index](2026-07-30-static-trace-presentation-index.md), [grouping policies](2026-07-30-trace-grouping-policies.md), [browser lenses and structured navigation](2026-07-30-trace-browser-lenses-and-structured-navigation.md), [borderless horizontal surface](2026-07-30-borderless-horizontal-trace-surface.md), [Codex transcript parity](2026-07-30-codex-transcript-parity.md), [live parent integration](2026-07-30-live-parent-trace-integration.md), and [parent-compatible candidate](2026-07-30-parent-compatible-transcript-candidate.md).
+
+Those plans inherit the quality doctrine and must preserve the baseline guarantees established here, but they do not expand this plan's scope. In particular, this plan does not authorize presentation-index implementation, grouped lenses, parent-TUI integration, or transcript replacement.
