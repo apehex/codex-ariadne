@@ -12,7 +12,6 @@ use codex_rollout::SESSIONS_SUBDIR;
 use crate::EvidenceGrade;
 use crate::SessionSummary;
 use crate::SessionTrace;
-use crate::SiblingOrder;
 use crate::TraceCapabilities;
 use crate::TraceCatalog;
 use crate::TraceDiagnostic;
@@ -315,15 +314,16 @@ impl TraceCatalog {
                 format!("session {session_id}"),
                 session_detail,
             ),
-            SiblingOrder::Unspecified,
+            crate::TraceNodeFacts::default(),
             /*source_path*/ None,
         );
         if graph.is_empty() {
-            let (nodes, diagnostics) = graph.finish();
+            let (nodes, facts, diagnostics) = graph.finish();
             return Ok(SessionTrace {
                 summary,
                 nodes,
                 diagnostics,
+                facts,
                 payloads: BTreeMap::new(),
             });
         }
@@ -407,15 +407,16 @@ impl TraceCatalog {
                     diagnostic.message.clone(),
                     detail,
                 ),
-                SiblingOrder::Unspecified,
+                crate::TraceNodeFacts::default(),
                 diagnostic.path.as_deref(),
             );
         }
-        let (nodes, diagnostics) = graph.finish();
+        let (nodes, facts, diagnostics) = graph.finish();
         Ok(SessionTrace {
             summary,
             nodes,
             diagnostics,
+            facts,
             payloads,
         })
     }

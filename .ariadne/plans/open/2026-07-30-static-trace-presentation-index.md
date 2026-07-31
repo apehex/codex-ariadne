@@ -12,7 +12,7 @@ Build and validate one immutable presentation index per loaded session so render
 
 The presentation index is a derived projection over immutable canonical trace nodes. It must support non-contiguous membership, stable group identity, reversible evidence navigation, and conservative aggregate metadata while leaving `SessionTrace` and `TraceIndex` authoritative for evidence and topology.
 
-This is Phase 2 and depends on [Phase 1](2026-07-30-trace-order-and-correlation.md). Its model and exact structural bounds are governed by the accepted [presentation-index contract](../../decisions/2026-07-31-trace-presentation-index-contract.md).
+This is Phase 2 and depends on [closed Phase 1](../closed/2026-07-30-trace-order-and-correlation.md). Its model and exact structural bounds are governed by the accepted [presentation-index contract](../../decisions/2026-07-31-trace-presentation-index-contract.md).
 
 ## Scope
 

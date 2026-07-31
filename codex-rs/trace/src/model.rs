@@ -445,6 +445,7 @@ pub struct SessionTrace {
     pub nodes: Vec<TraceNode>,
     /// Non-fatal discovery, replay, and projection diagnostics.
     pub diagnostics: Vec<TraceDiagnostic>,
+    pub(crate) facts: BTreeMap<TraceNodeLocator, crate::TraceNodeFacts>,
     pub(crate) payloads: BTreeMap<String, BundlePayload>,
 }
 
@@ -452,6 +453,11 @@ impl SessionTrace {
     /// Builds an immutable navigation index over retained nodes.
     pub fn index(&self) -> crate::TraceIndex {
         crate::TraceIndex::new(self)
+    }
+
+    /// Builds an immutable typed order and correlation index over retained nodes.
+    pub fn fact_index(&self) -> crate::TraceFactIndex {
+        crate::TraceFactIndex::new(self)
     }
 
     /// Iterates nodes without a parent.

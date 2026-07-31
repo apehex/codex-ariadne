@@ -14,15 +14,22 @@ use codex_protocol::protocol::RolloutItem;
 
 use crate::Admission;
 use crate::EvidenceGrade;
-use crate::SiblingOrder;
+use crate::TraceCorrelation;
 use crate::TraceDiagnostic;
+use crate::TraceFactAvailability;
 use crate::TraceGraphBuilder;
 use crate::TraceLimits;
 use crate::TraceNode;
+use crate::TraceNodeFacts;
 use crate::TraceNodeKind;
 use crate::TraceNodeLocator;
+use crate::TraceObjectRef;
+use crate::TraceOrder;
+use crate::TraceOwnership;
+use crate::TraceRelation;
 use crate::TraceSourceKind;
 use crate::catalog::OrdinaryThread;
+use crate::ordinary_facts;
 
 /// Precomputed ordinary-thread identity and containment relationships.
 pub(crate) struct OrdinaryTopology<'a> {
@@ -100,12 +107,12 @@ pub(crate) async fn load_thread(
     graph: &mut TraceGraphBuilder,
 ) {
     let base_thread_locator = thread_locator(session_id, &thread.thread_id);
-    let parent = match topology.parent_id(thread) {
-        Ok(Some(parent_id)) => thread_locator(session_id, parent_id),
-        Ok(None) => session_locator.clone(),
+    let (parent, parent_id) = match topology.parent_id(thread) {
+        Ok(Some(parent_id)) => (thread_locator(session_id, parent_id), Some(parent_id)),
+        Ok(None) => (session_locator.clone(), None),
         Err(message) => {
             graph.record_diagnostic(path_diagnostic(&thread.path, message));
-            session_locator.clone()
+            (session_locator.clone(), None)
         }
     };
     let thread_detail = serde_json::json!({
@@ -129,7 +136,27 @@ pub(crate) async fn load_thread(
             format!("thread {}", thread.thread_id),
             thread_detail,
         ),
-        thread_start_order(&thread.timestamp),
+        TraceNodeFacts::new(
+            parse_timestamp_millis(&thread.timestamp)
+                .map_or_else(TraceOrder::default, |timestamp| {
+                    TraceOrder::structural(timestamp, None)
+                }),
+            TraceOwnership {
+                thread_id: Some(thread.thread_id.clone()),
+                turn_id: None,
+            },
+            TraceFactAvailability::Partial,
+            std::iter::once(TraceCorrelation::new(
+                TraceRelation::SourceIdentity,
+                TraceObjectRef::Thread(thread.thread_id.clone()),
+            ))
+            .chain(parent_id.map(|parent_id| {
+                TraceCorrelation::new(
+                    TraceRelation::ParentThread,
+                    TraceObjectRef::Thread(parent_id.to_string()),
+                )
+            })),
+        ),
         Some(&thread.path),
     );
     let Admission::Retained(thread_locator) = admission else {
@@ -147,6 +174,7 @@ pub(crate) async fn load_thread(
         }
     };
     let mut line_index = 0_u64;
+    let mut current_turn_id = None;
     loop {
         let line = match reader.next_line(limits.max_ordinary_record_bytes).await {
             Ok(Some(line)) => line,
@@ -198,20 +226,51 @@ pub(crate) async fn load_thread(
             }
         };
         let typed = serde_json::from_value::<codex_protocol::protocol::RolloutLine>(value.clone());
-        let (kind, label) = match typed {
-            Ok(line) => record_kind(&line.item),
+        let (kind, label, facts) = match typed {
+            Ok(line) => {
+                if let RolloutItem::TurnContext(context) = &line.item {
+                    current_turn_id.clone_from(&context.turn_id);
+                }
+                let facts = ordinary_facts::record(
+                    &line.item,
+                    &thread.thread_id,
+                    ordinal(&value, line_index),
+                    value
+                        .get("timestamp")
+                        .and_then(serde_json::Value::as_str)
+                        .and_then(parse_timestamp_millis),
+                    current_turn_id.as_deref(),
+                );
+                let (kind, label) = record_kind(&line.item);
+                (kind, label, facts)
+            }
             Err(error) => {
                 graph.record_diagnostic(path_diagnostic(
                     &thread.path,
                     format!("unknown rollout record at line {line_index}: {error}"),
                 ));
-                (TraceNodeKind::RolloutRecord, "unknown record")
+                (
+                    TraceNodeKind::RolloutRecord,
+                    "unknown record",
+                    TraceNodeFacts::new(
+                        TraceOrder::ordinary(
+                            ordinal(&value, line_index),
+                            value
+                                .get("timestamp")
+                                .and_then(serde_json::Value::as_str)
+                                .and_then(parse_timestamp_millis),
+                        ),
+                        TraceOwnership {
+                            thread_id: Some(thread.thread_id.clone()),
+                            turn_id: current_turn_id.clone(),
+                        },
+                        TraceFactAvailability::Unavailable,
+                        [],
+                    ),
+                )
             }
         };
-        let ordinal = value
-            .get("ordinal")
-            .and_then(serde_json::Value::as_u64)
-            .unwrap_or(line_index);
+        let ordinal = ordinal(&value, line_index);
         graph.admit(
             TraceNode::projected(
                 TraceNodeLocator::new(
@@ -229,17 +288,25 @@ pub(crate) async fn load_thread(
                 label.to_string(),
                 value,
             ),
-            SiblingOrder::Sequence(ordinal),
+            facts,
             Some(&thread.path),
         );
     }
 }
 
-/// Converts an upstream RFC 3339 thread start into a sortable session-level position.
-fn thread_start_order(timestamp: &str) -> SiblingOrder {
-    DateTime::parse_from_rfc3339(timestamp).map_or(SiblingOrder::Unspecified, |timestamp| {
-        SiblingOrder::Timestamp(timestamp.timestamp_millis())
-    })
+/// Returns the persisted ordinal or the reader's stable line position.
+fn ordinal(value: &serde_json::Value, line_index: u64) -> u64 {
+    value
+        .get("ordinal")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(line_index)
+}
+
+/// Parses an upstream RFC 3339 timestamp for display without making it causal.
+fn parse_timestamp_millis(timestamp: &str) -> Option<i64> {
+    DateTime::parse_from_rfc3339(timestamp)
+        .ok()
+        .map(|timestamp| timestamp.timestamp_millis())
 }
 
 /// Maps a typed ordinary record to its normalized kind and label.

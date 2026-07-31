@@ -14,9 +14,11 @@ let session = catalog.load_session(session_id).await?;
 
 `SessionTrace::index()` constructs a `TraceIndex` snapshot for routine locator, root, and child lookup. The index also exposes compact node positions for consumers that retain an immutable loaded trace. Rebuild it after inserting, removing, or reordering nodes or changing a node locator or parent.
 
+`SessionTrace::fact_index()` constructs a `TraceFactIndex` snapshot over retained typed source facts. It exposes per-domain thread order, source ownership, and exact correlation lookup without parsing `TraceNode::detail`. Ordinary ordinals are comparable only inside their owning thread, rich event sequences share the rich source domain, and wall-clock times remain display facts. Rebuild the snapshot after structurally mutating the public node vector.
+
 Each `TraceNode` carries a bounded `TraceRecordPresentation` for listing, styling, and visibility filters. `TraceNode::content_document()` extracts bounded semantic Markdown, text, JSON, or code without following a raw-payload reference; exact payload access remains explicitly lazy.
 
-The crate explicitly re-exports its supported model types from `src/model.rs`, trace index from `src/index.rs`, and contained payload reader from `src/payload.rs`.
+The crate explicitly re-exports its supported model types from `src/model.rs`, structural and fact indexes from `src/index.rs` and `src/fact_index.rs`, typed facts from `src/facts.rs`, and the contained payload reader from `src/payload.rs`.
 
 ## Source pipeline
 
@@ -35,10 +37,15 @@ Discovery is metadata-oriented and does not eagerly reduce every rich bundle. Pr
 | `src/catalog.rs` | Repository configuration, bounded discovery, selection, summaries, and source reconciliation |
 | `src/graph.rs` | Bounded node admission, duplicate preservation, parent remapping, and conflict diagnostics |
 | `src/ordinary.rs` | Bounded plain or compressed ordinary-record reading and projection |
+| `src/ordinary_facts.rs` | Typed ordinary ordinal, ownership, and durable protocol-identity extraction |
 | `src/rich.rs` | Rich bundle reduction and normalized rich-node projection |
+| `src/rich_facts.rs` | Typed rich sequence, producer, runtime, compaction, and interaction extraction |
+| `src/rich_terminal_facts.rs` | Terminal ownership and model-observation correlation extraction |
 | `src/model.rs` | Public catalog, node, locator, capability, evidence, limit, diagnostic, and search-result types |
 | `src/presentation.rs` | Record classification and bounded semantic content documents |
 | `src/index.rs` | Snapshot index for locator lookup, root and child traversal, and compact node positions |
+| `src/facts.rs` | Renderer-neutral source-order, ownership, availability, identity, and relation vocabulary |
+| `src/fact_index.rs` | Immutable typed-fact lookup and compatible-domain thread ordering |
 | `src/search.rs` | Bounded attributed semantic search |
 | `src/payload.rs` | Canonically contained, size-limited, terminal-safe payload reads |
 | `src/*_tests.rs` | Sibling unit and integration evidence for each owning module |

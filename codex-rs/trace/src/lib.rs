@@ -7,18 +7,32 @@
 #![warn(missing_docs)]
 
 mod catalog;
+mod fact_index;
+mod facts;
 mod graph;
 mod index;
 mod model;
 mod ordinary;
+mod ordinary_facts;
 mod payload;
 mod presentation;
 mod rich;
+mod rich_facts;
+mod rich_terminal_facts;
 mod search;
 
 pub use catalog::TraceRepository;
+pub use fact_index::TraceFactIndex;
+pub use facts::TraceCorrelation;
+pub use facts::TraceFactAvailability;
+pub use facts::TraceNodeFacts;
+pub use facts::TraceObjectRef;
+pub use facts::TraceOrder;
+pub use facts::TraceOrderDomain;
+pub use facts::TraceOrderPoint;
+pub use facts::TraceOwnership;
+pub use facts::TraceRelation;
 pub(crate) use graph::Admission;
-pub(crate) use graph::SiblingOrder;
 pub(crate) use graph::TraceGraphBuilder;
 pub use index::TraceIndex;
 pub use model::EvidenceGrade;

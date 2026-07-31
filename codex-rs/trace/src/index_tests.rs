@@ -84,6 +84,7 @@ fn trace(nodes: Vec<TraceNode>) -> SessionTrace {
             thread_count: None,
         },
         nodes,
+        facts: BTreeMap::new(),
         diagnostics: Vec::new(),
         payloads: BTreeMap::new(),
     }

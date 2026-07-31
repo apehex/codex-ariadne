@@ -2,18 +2,29 @@ use pretty_assertions::assert_eq;
 use serde_json::json;
 
 use super::Admission;
-use super::SiblingOrder;
 use super::TraceGraphBuilder;
 use crate::EvidenceGrade;
+use crate::TraceCorrelation;
+use crate::TraceFactAvailability;
 use crate::TraceNode;
+use crate::TraceNodeFacts;
 use crate::TraceNodeKind;
 use crate::TraceNodeLocator;
+use crate::TraceObjectRef;
+use crate::TraceOrder;
+use crate::TraceOwnership;
 use crate::TraceRecordPresentation;
+use crate::TraceRelation;
 use crate::TraceSourceKind;
 
 #[test]
 fn preserves_duplicate_observations_and_reports_only_conflicts() {
-    let mut graph = TraceGraphBuilder::new(/*max_nodes*/ 4, Vec::new());
+    let mut graph = TraceGraphBuilder::new(/*max_nodes*/ 5, Vec::new());
+    graph.admit(
+        node("earlier"),
+        TraceNodeFacts::default(),
+        /*source_path*/ None,
+    );
     let original = node("same");
     let duplicate = original.clone();
     let mut conflict = original.clone();
@@ -22,21 +33,21 @@ fn preserves_duplicate_observations_and_reports_only_conflicts() {
     assert!(matches!(
         graph.admit(
             original,
-            SiblingOrder::Unspecified,
+            TraceNodeFacts::default(),
             /*source_path*/ None,
         ),
         Admission::Retained(_)
     ));
     let Admission::Retained(duplicate_locator) = graph.admit(
         duplicate,
-        SiblingOrder::Unspecified,
+        TraceNodeFacts::default(),
         /*source_path*/ None,
     ) else {
         panic!("duplicate should be retained");
     };
     let Admission::Retained(conflict_locator) = graph.admit(
         conflict,
-        SiblingOrder::Unspecified,
+        TraceNodeFacts::default(),
         /*source_path*/ None,
     ) else {
         panic!("conflict should be retained");
@@ -45,6 +56,23 @@ fn preserves_duplicate_observations_and_reports_only_conflicts() {
     assert_eq!(duplicate_locator.id, "same:observation:2");
     assert_eq!(conflict_locator.id, "same:observation:3");
     assert_eq!(graph.diagnostics().len(), 1);
+    let (_, facts, _) = graph.finish();
+    assert_eq!(
+        (
+            facts
+                .get(&TraceNodeLocator::new(
+                    "session",
+                    TraceNodeKind::ToolCall,
+                    "same",
+                ))
+                .map(|facts| facts.availability),
+            facts.get(&conflict_locator).map(|facts| facts.availability),
+        ),
+        (
+            Some(TraceFactAvailability::Conflicting),
+            Some(TraceFactAvailability::Conflicting),
+        )
+    );
 }
 
 #[test]
@@ -59,7 +87,7 @@ fn node_limit_and_missing_parent_never_admit_an_orphan() {
     assert_eq!(
         graph.admit_with_required_parent(
             child,
-            SiblingOrder::Unspecified,
+            TraceNodeFacts::default(),
             /*source_path*/ None,
         ),
         Admission::MissingParent
@@ -68,7 +96,7 @@ fn node_limit_and_missing_parent_never_admit_an_orphan() {
     assert!(matches!(
         graph.admit(
             node("first"),
-            SiblingOrder::Unspecified,
+            TraceNodeFacts::default(),
             /*source_path*/ None,
         ),
         Admission::Retained(_)
@@ -76,7 +104,7 @@ fn node_limit_and_missing_parent_never_admit_an_orphan() {
     assert_eq!(
         graph.admit(
             node("second"),
-            SiblingOrder::Unspecified,
+            TraceNodeFacts::default(),
             /*source_path*/ None,
         ),
         Admission::LimitReached
@@ -90,7 +118,7 @@ fn zero_and_exact_limits_have_deterministic_accounting() {
     assert_eq!(
         zero.admit(
             node("rejected"),
-            SiblingOrder::Unspecified,
+            TraceNodeFacts::default(),
             /*source_path*/ None,
         ),
         Admission::LimitReached
@@ -102,7 +130,7 @@ fn zero_and_exact_limits_have_deterministic_accounting() {
     assert!(matches!(
         exact.admit(
             node("first"),
-            SiblingOrder::Unspecified,
+            TraceNodeFacts::default(),
             /*source_path*/ None,
         ),
         Admission::Retained(_)
@@ -110,7 +138,7 @@ fn zero_and_exact_limits_have_deterministic_accounting() {
     assert!(matches!(
         exact.admit(
             node("second"),
-            SiblingOrder::Unspecified,
+            TraceNodeFacts::default(),
             /*source_path*/ None,
         ),
         Admission::Retained(_)
@@ -128,27 +156,27 @@ fn repeated_parent_observations_keep_their_children_together() {
 
     graph.admit(
         parent.clone(),
-        SiblingOrder::Unspecified,
+        TraceNodeFacts::default(),
         /*source_path*/ None,
     );
     graph.admit_with_required_parent(
         child.clone(),
-        SiblingOrder::Unspecified,
+        TraceNodeFacts::default(),
         /*source_path*/ None,
     );
     let Admission::Retained(repeated_parent) =
-        graph.admit(parent, SiblingOrder::Unspecified, /*source_path*/ None)
+        graph.admit(parent, TraceNodeFacts::default(), /*source_path*/ None)
     else {
         panic!("repeated parent must be retained");
     };
     let Admission::Retained(repeated_child) = graph.admit_with_required_parent(
         child,
-        SiblingOrder::Unspecified,
+        TraceNodeFacts::default(),
         /*source_path*/ None,
     ) else {
         panic!("repeated child must be retained");
     };
-    let (nodes, _) = graph.finish();
+    let (nodes, _, _) = graph.finish();
 
     let child = nodes
         .iter()
@@ -169,22 +197,18 @@ fn sibling_positions_override_locator_kind_and_lexicographic_id_order() {
         let mut child = node(id);
         child.locator.kind = kind;
         child.parent = Some(parent.clone());
-        graph.admit(
-            child,
-            SiblingOrder::Sequence(position),
-            /*source_path*/ None,
-        );
+        graph.admit(child, ordinary_facts(position), /*source_path*/ None);
     }
     let mut diagnostic = node("diagnostic");
     diagnostic.locator.kind = TraceNodeKind::Diagnostic;
     diagnostic.parent = Some(parent);
     graph.admit(
         diagnostic,
-        SiblingOrder::Unspecified,
+        TraceNodeFacts::default(),
         /*source_path*/ None,
     );
 
-    let (nodes, diagnostics) = graph.finish();
+    let (nodes, _, diagnostics) = graph.finish();
 
     assert!(diagnostics.is_empty());
     assert_eq!(
@@ -199,6 +223,51 @@ fn sibling_positions_override_locator_kind_and_lexicographic_id_order() {
             "diagnostic",
         ]
     );
+}
+
+#[test]
+fn correlations_are_bounded_globally_and_report_saturation_once() {
+    let mut graph = TraceGraphBuilder::new(/*max_nodes*/ 2, Vec::new());
+    for id in ["first", "second"] {
+        graph.admit(
+            node(id),
+            TraceNodeFacts::new(
+                TraceOrder::default(),
+                TraceOwnership::default(),
+                TraceFactAvailability::Complete,
+                (0..5).map(|index| {
+                    TraceCorrelation::new(
+                        TraceRelation::RawPayload,
+                        TraceObjectRef::RawPayload(format!("{id}:{index}")),
+                    )
+                }),
+            ),
+            /*source_path*/ None,
+        );
+    }
+
+    let (_, facts, diagnostics) = graph.finish();
+
+    assert_eq!(
+        facts
+            .values()
+            .map(|facts| facts.correlations.len())
+            .sum::<usize>(),
+        8
+    );
+    assert_eq!(diagnostics.len(), 1);
+}
+
+fn ordinary_facts(ordinal: u64) -> TraceNodeFacts {
+    TraceNodeFacts::new(
+        TraceOrder::ordinary(ordinal, None),
+        TraceOwnership {
+            thread_id: Some("thread".to_string()),
+            turn_id: None,
+        },
+        TraceFactAvailability::Partial,
+        [],
+    )
 }
 
 fn node(id: &str) -> TraceNode {

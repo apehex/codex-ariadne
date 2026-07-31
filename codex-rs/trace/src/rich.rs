@@ -9,12 +9,15 @@ use serde::Serialize;
 
 use crate::Admission;
 use crate::EvidenceGrade;
-use crate::SiblingOrder;
+use crate::TraceFactAvailability;
 use crate::TraceGraphBuilder;
 use crate::TraceNode;
+use crate::TraceNodeFacts;
 use crate::TraceNodeKind;
 use crate::TraceNodeLocator;
 use crate::payload::BundlePayload;
+use crate::rich_facts;
+use crate::rich_terminal_facts;
 
 /// Projects one reduced rich trace through a source-specific projection context.
 #[allow(clippy::too_many_arguments)]
@@ -46,6 +49,7 @@ struct RichProjector<'a> {
     graph: &'a mut TraceGraphBuilder,
     payloads: &'a mut BTreeMap<String, BundlePayload>,
     semantic_evidence: EvidenceGrade,
+    fact_availability: TraceFactAvailability,
 }
 
 impl<'a> RichProjector<'a> {
@@ -63,6 +67,11 @@ impl<'a> RichProjector<'a> {
         } else {
             EvidenceGrade::Reconstructed
         };
+        let fact_availability = if semantically_complete {
+            TraceFactAvailability::Complete
+        } else {
+            TraceFactAvailability::Partial
+        };
         Self {
             session_id,
             bundle_path,
@@ -70,6 +79,7 @@ impl<'a> RichProjector<'a> {
             graph,
             payloads,
             semantic_evidence,
+            fact_availability,
         }
     }
 
@@ -102,7 +112,7 @@ impl<'a> RichProjector<'a> {
                 id,
                 parent,
                 timestamp: Some(thread.execution.started_at_unix_ms.to_string()),
-                sibling_order: SiblingOrder::Timestamp(thread.execution.started_at_unix_ms),
+                facts: rich_facts::thread(id, thread, self.fact_availability),
                 label: format!("thread {}", thread.agent_path),
                 value: thread,
                 evidence: self.semantic_evidence,
@@ -114,7 +124,7 @@ impl<'a> RichProjector<'a> {
                 id,
                 parent: self.locator(TraceNodeKind::Thread, &turn.thread_id),
                 timestamp: Some(turn.execution.started_at_unix_ms.to_string()),
-                sibling_order: SiblingOrder::Sequence(turn.execution.started_seq),
+                facts: rich_facts::turn(id, turn, self.fact_availability),
                 label: format!("turn {id}"),
                 value: turn,
                 evidence: self.semantic_evidence,
@@ -130,7 +140,7 @@ impl<'a> RichProjector<'a> {
                 id,
                 parent,
                 timestamp: Some(item.first_seen_at_unix_ms.to_string()),
-                sibling_order: SiblingOrder::Sequence(item.first_seen_seq),
+                facts: rich_facts::conversation_item(id, item, self.fact_availability),
                 label: format!("conversation {:?}", item.kind),
                 value: item,
                 evidence: self.semantic_evidence,
@@ -142,7 +152,7 @@ impl<'a> RichProjector<'a> {
                 id,
                 parent: self.locator(TraceNodeKind::Turn, &inference.codex_turn_id),
                 timestamp: Some(inference.execution.started_at_unix_ms.to_string()),
-                sibling_order: SiblingOrder::Sequence(inference.execution.started_seq),
+                facts: rich_facts::inference(id, inference, self.fact_availability),
                 label: format!("inference {}", inference.model),
                 value: inference,
                 evidence: self.semantic_evidence,
@@ -158,7 +168,7 @@ impl<'a> RichProjector<'a> {
                 id,
                 parent,
                 timestamp: Some(tool.execution.started_at_unix_ms.to_string()),
-                sibling_order: SiblingOrder::Sequence(tool.execution.started_seq),
+                facts: rich_facts::tool(id, tool, self.fact_availability),
                 label: format!("tool {:?}", tool.kind),
                 value: tool,
                 evidence: self.semantic_evidence,
@@ -170,7 +180,7 @@ impl<'a> RichProjector<'a> {
                 id,
                 parent: self.locator(TraceNodeKind::Turn, &cell.codex_turn_id),
                 timestamp: Some(cell.execution.started_at_unix_ms.to_string()),
-                sibling_order: SiblingOrder::Sequence(cell.execution.started_seq),
+                facts: rich_facts::code_cell(id, cell, self.fact_availability),
                 label: format!("code cell {id}"),
                 value: cell,
                 evidence: self.semantic_evidence,
@@ -183,7 +193,7 @@ impl<'a> RichProjector<'a> {
                 id,
                 parent: self.session_locator.clone(),
                 timestamp: None,
-                sibling_order: SiblingOrder::Unspecified,
+                facts: rich_facts::raw_payload(id),
                 label: format!("payload {:?}", reference.kind),
                 value: reference,
                 evidence: EvidenceGrade::Exact,
@@ -209,7 +219,7 @@ impl<'a> RichProjector<'a> {
                 id,
                 parent: self.locator(TraceNodeKind::Turn, &compaction.codex_turn_id),
                 timestamp: Some(compaction.installed_at_unix_ms.to_string()),
-                sibling_order: SiblingOrder::Sequence(compaction.installed_seq),
+                facts: rich_facts::compaction(id, compaction, self.fact_availability),
                 label: format!("compaction {id}"),
                 value: compaction,
                 evidence: self.semantic_evidence,
@@ -221,19 +231,31 @@ impl<'a> RichProjector<'a> {
                 id,
                 parent: self.locator(TraceNodeKind::Compaction, &request.compaction_id),
                 timestamp: Some(request.execution.started_at_unix_ms.to_string()),
-                sibling_order: SiblingOrder::Sequence(request.execution.started_seq),
+                facts: rich_facts::compaction_request(id, request, self.fact_availability),
                 label: format!("compaction request {}", request.model),
                 value: request,
                 evidence: self.semantic_evidence,
             })?;
         }
         for (id, operation) in &trace.terminal_operations {
+            let ownership = trace.tool_calls.get(&operation.tool_call_id).map_or_else(
+                crate::TraceOwnership::default,
+                |tool| crate::TraceOwnership {
+                    thread_id: Some(tool.thread_id.clone()),
+                    turn_id: tool.started_by_codex_turn_id.clone(),
+                },
+            );
             self.admit_required(RichNodeSpec {
                 kind: TraceNodeKind::TerminalOperation,
                 id,
                 parent: self.locator(TraceNodeKind::ToolCall, &operation.tool_call_id),
                 timestamp: Some(operation.execution.started_at_unix_ms.to_string()),
-                sibling_order: SiblingOrder::Sequence(operation.execution.started_seq),
+                facts: rich_terminal_facts::operation(
+                    id,
+                    operation,
+                    ownership,
+                    self.fact_availability,
+                ),
                 label: format!("terminal operation {:?}", operation.kind),
                 value: operation,
                 evidence: self.semantic_evidence,
@@ -248,7 +270,7 @@ impl<'a> RichProjector<'a> {
                     &terminal.created_by_operation_id,
                 ),
                 timestamp: Some(terminal.execution.started_at_unix_ms.to_string()),
-                sibling_order: SiblingOrder::Sequence(terminal.execution.started_seq),
+                facts: rich_terminal_facts::session(id, terminal, self.fact_availability),
                 label: format!("terminal {id}"),
                 value: terminal,
                 evidence: self.semantic_evidence,
@@ -260,7 +282,7 @@ impl<'a> RichProjector<'a> {
                 id,
                 parent: self.session_locator.clone(),
                 timestamp: Some(edge.started_at_unix_ms.to_string()),
-                sibling_order: SiblingOrder::Timestamp(edge.started_at_unix_ms),
+                facts: rich_facts::interaction(id, edge, self.fact_availability),
                 label: format!("interaction {:?}", edge.kind),
                 value: edge,
                 evidence: self.semantic_evidence,
@@ -271,20 +293,20 @@ impl<'a> RichProjector<'a> {
 
     /// Admits a child whose parent must already be retained.
     fn admit_required<T: Serialize>(&mut self, spec: RichNodeSpec<'_, T>) -> Result<Admission> {
-        let (node, sibling_order) = self.node(spec)?;
+        let (node, facts) = self.node(spec)?;
         Ok(self
             .graph
-            .admit_with_required_parent(node, sibling_order, /*source_path*/ None))
+            .admit_with_required_parent(node, facts, /*source_path*/ None))
     }
 
     /// Admits a structural container whose parent may be projected later.
     fn admit_deferred<T: Serialize>(&mut self, spec: RichNodeSpec<'_, T>) -> Result<Admission> {
-        let (node, sibling_order) = self.node(spec)?;
-        Ok(self.graph.admit(node, sibling_order, /*source_path*/ None))
+        let (node, facts) = self.node(spec)?;
+        Ok(self.graph.admit(node, facts, /*source_path*/ None))
     }
 
     /// Builds one rich node while deriving presentation from serialized detail.
-    fn node<T: Serialize>(&self, spec: RichNodeSpec<'_, T>) -> Result<(TraceNode, SiblingOrder)> {
+    fn node<T: Serialize>(&self, spec: RichNodeSpec<'_, T>) -> Result<(TraceNode, TraceNodeFacts)> {
         let detail = serde_json::to_value(spec.value)?;
         Ok((
             TraceNode::projected(
@@ -296,7 +318,7 @@ impl<'a> RichProjector<'a> {
                 spec.label,
                 detail,
             ),
-            spec.sibling_order,
+            spec.facts,
         ))
     }
 
@@ -312,7 +334,7 @@ struct RichNodeSpec<'a, T> {
     id: &'a str,
     parent: TraceNodeLocator,
     timestamp: Option<String>,
-    sibling_order: SiblingOrder,
+    facts: TraceNodeFacts,
     label: String,
     value: &'a T,
     evidence: EvidenceGrade,

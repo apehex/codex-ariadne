@@ -30,6 +30,10 @@ Ordinary parent observations are normalized into one session-scoped topology bef
 
 Siblings use typed source positions: structural thread containers use recorded start time, ordinary records use numeric rollout ordinals, and rich semantic nodes use their first raw event sequence. Timestamped containers precede the causal event stream when both share a parent, rather than comparing incompatible timestamp and sequence units. Unpositioned diagnostics and raw artifacts follow positioned siblings in stable admission order. Display timestamps are never used to reorder records within a thread, so delayed or regressing wall-clock observations remain in causal order. Locators survive filtering and sorting within a source version but are not a persisted compatibility promise across upstream schema migrations.
 
+Graph finalization retains those positions as `TraceNodeFacts` instead of discarding them after sibling sorting. The fact vocabulary keeps ordinary, rich, structural, and unspecified domains distinct; ordinary positions compare only for the same recorded thread, while rich positions use the bundle-wide raw-event sequence. Execution facts retain optional end sequence and start/end wall-clock values, plus a deterministic admission tie-break that does not manufacture causal order.
+
+`TraceNodeFacts` also retains source ownership, an explicit complete/partial/unavailable/conflicting state, and typed correlations. Correlations cover source identities, parent and spawn edges, turn inputs, conversation producers, model-visible call IDs, runtime tool/MCP/code-mode IDs, inference inputs and outputs, code-cell membership, compaction membership, terminal ownership and model observations, interaction endpoints and carried items, and raw payload references. Ordinary sources expose only durable fields present in rollout records and remain partial rather than guessing rich runtime relationships.
+
 ## Projection and reconciliation
 
 Ordinary projection uses `codex-rollout` and protocol records. It provides durable transcript and lifecycle semantics but does not claim exact generation context or decrypted collaboration content when those values were not persisted.
@@ -54,9 +58,11 @@ Ordinary plain and compressed records and rich event lines are retained only up 
 
 Node admission is centralized in a graph builder. It applies the cap before mutation, preserves repeated identities with stable observation suffixes, remaps children to the latest retained parent observation, and reports incompatible observations without deleting either side.
 
-The selected trace is retained as a public node vector. `TraceIndex` provides a separately owned snapshot over that vector for locator lookup, roots, and parent-to-child adjacency. It builds in linear time, preserves node-vector order, provides expected constant-time selection before result iteration, and avoids duplicating graph semantics in consumers.
+The selected trace is retained as a public node vector. `TraceIndex` provides a separately owned snapshot over that vector for locator lookup, roots, and parent-to-child adjacency. `TraceFactIndex` is an additive companion for position-to-fact lookup, compatible-domain thread order, and exact reverse correlation lookup. Both build in linear time plus per-thread ordering, preserve the loaded node positions, and avoid arbitrary detail-JSON interpretation in consumers.
 
-The index is deliberately not embedded in `SessionTrace`: its public nodes and their structural fields remain mutable for compatibility, so a hidden cache could silently become stale. Consumers build one index per loaded session and must rebuild it after inserting, removing, or reordering nodes or changing a locator or parent. Existing `SessionTrace` lookup methods retain their signatures and scan behavior for compatibility; routine browser navigation should use `TraceIndex`.
+The indexes are deliberately not embedded in `SessionTrace`: its public nodes and their structural fields remain mutable for compatibility, so a hidden cache could silently become stale. Consumers build one snapshot of each required index per loaded session and must rebuild after inserting, removing, or reordering nodes or changing a locator or parent. Existing `SessionTrace` lookup methods retain their signatures and scan behavior for compatibility; routine browser navigation should use `TraceIndex`.
+
+Each node retains at most 4,096 typed correlations. Graph admission additionally retains at most four correlations per configured node slot across one loaded session and emits one saturation diagnostic when that global budget truncates facts. Truncation marks affected complete facts partial; conflicting repeated observations mark both sides conflicting without deleting either observation.
 
 Rich replay is selected-root lazy but the reducer is synchronous once invoked. Cooperative cancellation inside an already-running reducer remains a hardening gap.
 
