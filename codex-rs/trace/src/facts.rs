@@ -5,7 +5,7 @@ use std::cmp::Ordering;
 pub(crate) const MAX_CORRELATIONS_PER_NODE: usize = 4_096;
 
 /// Source domain that gives an order point its meaning.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum TraceOrderDomain {
     /// Per-thread ordinary rollout ordinal or line order.
     Ordinary,
@@ -141,7 +141,7 @@ pub enum TraceFactAvailability {
 }
 
 /// Typed identity referenced by a correlation relation.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum TraceObjectRef {
     /// Agent thread identity.
     Thread(String),

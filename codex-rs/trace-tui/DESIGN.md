@@ -20,7 +20,7 @@ The picker owns precomputed normalized labels, cached query matches, selection, 
 
 Every browser instance receives a unique epoch. Background session and payload results carry their root-session identity, while search, detail, and payload work is admitted through latest-request state containing the browser epoch, request generation, and complete view key. Results replace state only when all three remain current, including when the same session is reloaded into a replacement browser. Cancellation, invalidation, or failure returns to the previous stable screen and exposes an error without installing a partial session.
 
-The accepted successor architecture is defined by the [presentation-index contract](../../.ariadne/decisions/2026-07-31-trace-presentation-index-contract.md). Once its implementation phases land, the browser will consume one immutable `PresentationIndex` beside `TraceIndex`; it will not derive groups, order, completeness, or summaries from rendered rows.
+The accepted successor architecture is defined by the [presentation-index contract](../../.ariadne/decisions/2026-07-31-trace-presentation-index-contract.md). Initial browser construction now materializes one immutable `PresentationIndex` beside `TraceIndex`; later lens phases will consume it instead of deriving groups, order, completeness, or summaries from rendered rows.
 
 ## Event loop
 
@@ -58,7 +58,7 @@ Visible search runs over the enabled semantic classes, while all-record search m
 
 Rendering must scale with terminal area and visible detail, not with total trace size. Lists render a viewport window. Wrapped detail should be cached by locator, width, display mode, and payload state. Repeated labels and summaries should be prepared when state changes rather than serialized during every frame.
 
-The browser builds one `TraceIndex` with its selected session and retains only the current container's filtered child positions. Ordinary cursor movement and redraw therefore touch a terminal-sized viewport rather than flattening or scanning the complete trace.
+The browser builds one `TraceIndex` and one `PresentationIndex` with its selected session and retains only the current container's filtered child positions. Ordinary cursor movement and redraw therefore touch a terminal-sized viewport rather than flattening or scanning the complete trace. The current structural lens does not yet render presentation groups; Phase 4 owns that navigation change.
 
 The detail cache is keyed by locator, width, content mode, and payload generation. Semantic extraction and host rendering run in generation-tagged background jobs over shared immutable trace/index snapshots, so resizing or changing modes cannot install stale work. Semantic detail is capped at 64 KiB and discloses truncation; loaded raw payloads remain bounded by the source reader. A deterministic 100,000-node profile measures current-level construction, return, and warm navigation without expansion-specific state.
 

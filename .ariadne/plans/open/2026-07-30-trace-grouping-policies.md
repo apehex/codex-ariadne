@@ -10,7 +10,7 @@ Complete deterministic, versioned presentation-group policies for the Codex reco
 
 ## Context
 
-This is Phase 3. The minimal index from [Phase 2](2026-07-30-static-trace-presentation-index.md) proves the partition and query model. This phase adds the group families and degradation rules defined by the accepted [presentation-index contract](../../decisions/2026-07-31-trace-presentation-index-contract.md) without adding terminal rendering or browser state.
+This is Phase 3. The minimal index from [closed Phase 2](../closed/2026-07-30-static-trace-presentation-index.md) proves the partition and query model. This phase adds the group families and degradation rules defined by the accepted [presentation-index contract](../../decisions/2026-07-31-trace-presentation-index-contract.md) without adding terminal rendering or browser state.
 
 Some groups combine the lifecycle of one correlated object, while higher-order groups such as an exploration batch contain several child tool groups. Temporal adjacency may close or batch groups only where Codex presentation semantics explicitly require it; it must not replace durable correlation.
 

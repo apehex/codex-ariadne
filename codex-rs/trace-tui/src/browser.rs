@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
+use codex_trace::PresentationIndex;
 use codex_trace::SanitizedPayload;
 use codex_trace::SearchHit;
 use codex_trace::SessionTrace;
@@ -76,6 +77,7 @@ pub(crate) struct BrowserState {
     epoch: BrowserEpoch,
     trace: Arc<SessionTrace>,
     index: Arc<TraceIndex>,
+    presentation: Arc<PresentationIndex>,
     container: Option<TraceNodeLocator>,
     stack: Vec<NavigationFrame>,
     rows: Vec<usize>,
@@ -111,6 +113,7 @@ impl std::fmt::Debug for BrowserState {
             .debug_struct("BrowserState")
             .field("container", &self.container)
             .field("rows", &self.rows.len())
+            .field("presentation_groups", &self.presentation.groups().len())
             .field("selection", &self.selection)
             .field("detail_open", &self.detail_open)
             .field("content_mode", &self.content_mode)
@@ -136,6 +139,7 @@ impl BrowserState {
         epoch: BrowserEpoch,
     ) -> Self {
         let index = Arc::new(TraceIndex::new(&trace));
+        let presentation = Arc::new(PresentationIndex::new(&trace));
         let trace = Arc::new(trace);
         let container = index
             .root_nodes(&trace)
@@ -146,6 +150,7 @@ impl BrowserState {
             epoch,
             trace,
             index,
+            presentation,
             container,
             stack: Vec::new(),
             rows: Vec::new(),

@@ -460,6 +460,11 @@ impl SessionTrace {
         crate::TraceFactIndex::new(self)
     }
 
+    /// Builds an immutable renderer-neutral presentation snapshot.
+    pub fn presentation_index(&self) -> crate::PresentationIndex {
+        crate::PresentationIndex::new(self)
+    }
+
     /// Iterates nodes without a parent.
     pub fn root_nodes(&self) -> impl Iterator<Item = &TraceNode> {
         self.nodes.iter().filter(|node| node.parent.is_none())
