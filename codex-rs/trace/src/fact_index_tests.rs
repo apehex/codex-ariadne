@@ -53,9 +53,9 @@ fn exact_correlation_lookup_returns_all_matching_nodes() {
         relation: TraceRelation::ModelVisibleCall,
         target: TraceObjectRef::ModelVisibleCall("call".to_string()),
     };
-    let mut first_facts = rich_facts(1, 1);
+    let mut first_facts = rich_facts(/*sequence*/ 1, /*wall_clock_start_ms*/ 1);
     first_facts.correlations.push(correlation.clone());
-    let mut second_facts = rich_facts(2, 2);
+    let mut second_facts = rich_facts(/*sequence*/ 2, /*wall_clock_start_ms*/ 2);
     second_facts.correlations.push(correlation.clone());
     let trace = trace(vec![
         (locator("first"), first_facts),
@@ -78,7 +78,7 @@ fn merged_sources_share_identity_without_claiming_cross_domain_order() {
         target: TraceObjectRef::ConversationItem("item".to_string()),
     };
     let ordinary = TraceNodeFacts::new(
-        TraceOrder::ordinary(8, Some(80)),
+        TraceOrder::ordinary(/*ordinal*/ 8, Some(80)),
         TraceOwnership {
             thread_id: Some("thread".to_string()),
             turn_id: None,
@@ -86,7 +86,7 @@ fn merged_sources_share_identity_without_claiming_cross_domain_order() {
         TraceFactAvailability::Partial,
         [identity.clone()],
     );
-    let mut rich = rich_facts(9, 90);
+    let mut rich = rich_facts(/*sequence*/ 9, /*wall_clock_start_ms*/ 90);
     rich.correlations.push(identity.clone());
     let trace = trace(vec![
         (locator("ordinary"), ordinary.clone()),
@@ -106,11 +106,17 @@ fn merged_sources_share_identity_without_claiming_cross_domain_order() {
 #[test]
 fn structural_mutation_requires_rebuilding_the_fact_snapshot() {
     let first = locator("first");
-    let mut trace = trace(vec![(first, rich_facts(1, 1))]);
+    let mut trace = trace(vec![(
+        first,
+        rich_facts(/*sequence*/ 1, /*wall_clock_start_ms*/ 1),
+    )]);
     let stale = trace.fact_index();
     let second = locator("second");
     trace.nodes.push(node(second.clone()));
-    trace.facts.insert(second.clone(), rich_facts(2, 2));
+    trace.facts.insert(
+        second.clone(),
+        rich_facts(/*sequence*/ 2, /*wall_clock_start_ms*/ 2),
+    );
 
     assert_eq!(stale.facts(&trace, &second), None);
     assert_eq!(
@@ -118,7 +124,10 @@ fn structural_mutation_requires_rebuilding_the_fact_snapshot() {
             .fact_index()
             .facts(&trace, &second)
             .map(|facts| facts.order),
-        Some(TraceOrder::rich(2, None, 2, None))
+        Some(TraceOrder::rich(
+            /*started_seq*/ 2, /*ended_seq*/ None, /*started_at_unix_ms*/ 2,
+            /*ended_at_unix_ms*/ None
+        ))
     );
 }
 
@@ -167,7 +176,12 @@ fn locator(id: &str) -> TraceNodeLocator {
 
 fn rich_facts(sequence: u64, wall_clock_start_ms: i64) -> TraceNodeFacts {
     TraceNodeFacts::new(
-        TraceOrder::rich(sequence, None, wall_clock_start_ms, None),
+        TraceOrder::rich(
+            sequence,
+            /*ended_seq*/ None,
+            wall_clock_start_ms,
+            /*ended_at_unix_ms*/ None,
+        ),
         TraceOwnership {
             thread_id: Some("thread".to_string()),
             turn_id: None,

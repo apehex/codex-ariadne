@@ -4173,6 +4173,7 @@ dependencies = [
  "codex-protocol",
  "codex-rollout",
  "codex-rollout-trace",
+ "codex-shell-command",
  "pretty_assertions",
  "serde",
  "serde_json",

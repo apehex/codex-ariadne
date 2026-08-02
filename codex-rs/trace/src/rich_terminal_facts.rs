@@ -54,6 +54,7 @@ pub(crate) fn operation(
         availability,
         correlations,
     )
+    .with_activity(crate::presentation_facts::terminal(operation))
 }
 
 pub(crate) fn session(

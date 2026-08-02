@@ -140,6 +140,106 @@ pub enum TraceFactAvailability {
     Conflicting,
 }
 
+/// Whether retained command facts support Codex exploration batching.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum TraceExplorationEligibility {
+    /// Every parsed command is a supported read, list, or search operation.
+    Eligible,
+    /// The command is known not to satisfy the exploration policy.
+    Ineligible,
+    /// The source did not retain enough information to classify the command.
+    #[default]
+    Unavailable,
+}
+
+/// Immediate caller of a retained runtime tool.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum TraceToolRequester {
+    /// The model directly requested the tool.
+    Model,
+    /// A model-authored code cell requested the nested tool.
+    CodeCell,
+    /// The source did not retain the requester.
+    #[default]
+    Unknown,
+}
+
+/// Typed operation family used by presentation grouping policies.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TraceToolActivity {
+    /// A new terminal command, with its exploration classification.
+    ExecCommand(TraceExplorationEligibility),
+    /// Bytes written to a running terminal.
+    WriteStdin,
+    /// A terminal poll that writes no bytes.
+    PollTerminal,
+    /// A file patch operation.
+    ApplyPatch,
+    /// A Model Context Protocol tool.
+    Mcp,
+    /// A web operation.
+    Web,
+    /// An image generation or lookup operation.
+    ImageGeneration,
+    /// A dynamic or unsupported tool family.
+    Other,
+}
+
+/// Typed agent/control-plane action used by grouping policies.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TraceAgentActivity {
+    /// Create a child agent.
+    Spawn,
+    /// Assign or follow up on agent work.
+    Assign,
+    /// Send an agent message.
+    Send,
+    /// Wait for one or more agents.
+    Wait,
+    /// Deliver a child-agent result.
+    Result,
+    /// Resume a stopped agent.
+    Resume,
+    /// Close or interrupt an agent.
+    Close,
+}
+
+/// Typed compaction observation used by grouping policies.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TraceCompactionActivity {
+    /// Installed history-replacement checkpoint.
+    Checkpoint,
+    /// Upstream request contributing to a checkpoint.
+    Request,
+    /// Model-visible or ordinary compaction marker.
+    Marker,
+}
+
+/// Renderer-neutral activity retained at the source adapter boundary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TraceActivity {
+    /// A direct runtime tool operation.
+    Tool {
+        /// Operation family.
+        kind: TraceToolActivity,
+        /// Immediate requester.
+        requester: TraceToolRequester,
+    },
+    /// A multi-agent/control-plane operation.
+    Agent(TraceAgentActivity),
+    /// A model-authored code cell.
+    CodeCell,
+    /// A context compaction observation.
+    Compaction(TraceCompactionActivity),
+}
+
+/// Small typed facts consumed only by presentation policies.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TracePolicyFacts {
+    /// Source-derived activity, or `None` when the record has no supported policy role.
+    pub activity: Option<TraceActivity>,
+}
+
 /// Typed identity referenced by a correlation relation.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum TraceObjectRef {
@@ -274,6 +374,8 @@ pub struct TraceNodeFacts {
     pub availability: TraceFactAvailability,
     /// Bounded typed relations to other source objects.
     pub correlations: Vec<TraceCorrelation>,
+    /// Typed renderer-neutral facts needed by grouping policies.
+    pub policy: TracePolicyFacts,
 }
 
 impl TraceNodeFacts {
@@ -298,7 +400,14 @@ impl TraceNodeFacts {
                 availability
             },
             correlations: retained,
+            policy: TracePolicyFacts::default(),
         }
+    }
+
+    /// Attaches one typed activity while preserving order and correlation facts.
+    pub(crate) fn with_activity(mut self, activity: TraceActivity) -> Self {
+        self.policy.activity = Some(activity);
+        self
     }
 
     /// Compares causal source positions only when their domains are compatible.

@@ -34,7 +34,7 @@ pub(crate) fn record(
         | RolloutItem::WorldState(_)
         | RolloutItem::EventMsg(_) => current_turn_id,
     };
-    TraceNodeFacts::new(
+    let facts = TraceNodeFacts::new(
         TraceOrder::ordinary(ordinal, wall_clock_start_ms),
         TraceOwnership {
             thread_id: Some(thread_id.to_string()),
@@ -42,7 +42,11 @@ pub(crate) fn record(
         },
         TraceFactAvailability::Partial,
         correlations(item),
-    )
+    );
+    match crate::presentation_facts::ordinary(item) {
+        Some(activity) => facts.with_activity(activity),
+        None => facts,
+    }
 }
 
 /// Maps durable identities and protocol call IDs into typed links.

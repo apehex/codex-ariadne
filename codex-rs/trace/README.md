@@ -46,6 +46,7 @@ Discovery is metadata-oriented and does not eagerly reduce every rich bundle. Pr
 | `src/index.rs` | Snapshot index for locator lookup, root and child traversal, and compact node positions |
 | `src/facts.rs` | Renderer-neutral source-order, ownership, availability, identity, and relation vocabulary |
 | `src/fact_index.rs` | Immutable typed-fact lookup and compatible-domain thread ordering |
+| `src/presentation_*.rs` | Renderer-neutral policy facts, lifecycle ownership, hierarchy reduction, summaries, validation, and immutable presentation queries |
 | `src/search.rs` | Bounded attributed semantic search |
 | `src/payload.rs` | Canonically contained, size-limited, terminal-safe payload reads |
 | `src/*_tests.rs` | Sibling unit and integration evidence for each owning module |

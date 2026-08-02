@@ -3,13 +3,18 @@ use codex_protocol::protocol::RolloutItem;
 use pretty_assertions::assert_eq;
 
 use super::record;
+use crate::TraceActivity;
 use crate::TraceCorrelation;
+use crate::TraceExplorationEligibility;
 use crate::TraceFactAvailability;
 use crate::TraceNodeFacts;
 use crate::TraceObjectRef;
 use crate::TraceOrder;
 use crate::TraceOwnership;
+use crate::TracePolicyFacts;
 use crate::TraceRelation;
+use crate::TraceToolActivity;
+use crate::TraceToolRequester;
 
 #[test]
 fn response_items_retain_ordinary_order_ownership_and_call_identity() {
@@ -32,7 +37,7 @@ fn response_items_retain_ordinary_order_ownership_and_call_identity() {
             Some("turn"),
         ),
         TraceNodeFacts {
-            order: TraceOrder::ordinary(7, Some(99)),
+            order: TraceOrder::ordinary(/*ordinal*/ 7, Some(99)),
             ownership: TraceOwnership {
                 thread_id: Some("thread".to_string()),
                 turn_id: Some("turn".to_string()),
@@ -42,6 +47,12 @@ fn response_items_retain_ordinary_order_ownership_and_call_identity() {
                 relation: TraceRelation::ModelVisibleCall,
                 target: TraceObjectRef::ModelVisibleCall("call-1".to_string()),
             }],
+            policy: TracePolicyFacts {
+                activity: Some(TraceActivity::Tool {
+                    kind: TraceToolActivity::ExecCommand(TraceExplorationEligibility::Unavailable,),
+                    requester: TraceToolRequester::Model,
+                }),
+            },
         }
     );
 }

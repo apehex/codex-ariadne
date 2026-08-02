@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 
 use crate::EvidenceGrade;
+use crate::GroupActivity;
 use crate::GroupAggregate;
 use crate::GroupCompleteness;
 use crate::GroupEvidenceCounts;
@@ -11,12 +12,16 @@ use crate::GroupKind;
 use crate::GroupMetadata;
 use crate::GroupReference;
 use crate::SessionTrace;
+use crate::TraceActivity;
+use crate::TraceAgentActivity;
+use crate::TraceCompactionActivity;
 use crate::TraceFactAvailability;
 use crate::TraceNodeFacts;
 use crate::TraceObjectRef;
 use crate::TraceRecordClass;
 use crate::TraceRelation;
 use crate::TraceStatus;
+use crate::TraceToolActivity;
 
 pub(crate) struct ReferenceResult {
     pub(crate) values: Vec<GroupReference>,
@@ -99,8 +104,9 @@ pub(crate) fn references(
 
 pub(crate) fn summarize(
     trace: &SessionTrace,
-    _kind: GroupKind,
+    kind: GroupKind,
     members: &[usize],
+    child_count: usize,
     reference_count: usize,
     text_budget: usize,
     preview_chars: usize,
@@ -132,6 +138,7 @@ pub(crate) fn summarize(
     let mut evidence = GroupEvidenceCounts::default();
     let mut statuses = Vec::new();
     let mut durations = Vec::new();
+    let mut activities = Vec::new();
     for position in members {
         let Some(node) = trace.nodes.get(*position) else {
             continue;
@@ -141,6 +148,9 @@ pub(crate) fn summarize(
             statuses.push(status);
         }
         let facts = facts_at(trace, *position);
+        if let Some(activity) = facts.policy.activity.and_then(group_activity) {
+            activities.push(activity);
+        }
         if let (Some(start), Some(end)) = (
             facts.order.wall_clock_start_ms,
             facts.order.wall_clock_end_ms,
@@ -153,15 +163,68 @@ pub(crate) fn summarize(
         label_bytes: label.as_ref().map_or(0, String::len),
         preview_bytes: preview.as_ref().map_or(0, String::len),
         metadata: GroupMetadata {
+            activity: if kind == GroupKind::ExplorationBatch {
+                GroupAggregate::Value(GroupActivity::Exploration)
+            } else {
+                aggregate_activities(activities)
+            },
             label,
             preview,
             status: aggregate(statuses),
             duration_ms: aggregate(durations),
             member_count: members.len(),
+            child_count,
             reference_count,
             evidence,
         },
         truncated,
+    }
+}
+
+/// Maps source policy activity into renderer-neutral group metadata.
+fn group_activity(activity: TraceActivity) -> Option<GroupActivity> {
+    match activity {
+        TraceActivity::Tool { kind, .. } => Some(match kind {
+            TraceToolActivity::ExecCommand(_) => GroupActivity::ExecCommand,
+            TraceToolActivity::WriteStdin => GroupActivity::WriteStdin,
+            TraceToolActivity::PollTerminal => GroupActivity::PollTerminal,
+            TraceToolActivity::ApplyPatch => GroupActivity::ApplyPatch,
+            TraceToolActivity::Mcp => GroupActivity::Mcp,
+            TraceToolActivity::Web => GroupActivity::Web,
+            TraceToolActivity::ImageGeneration => GroupActivity::ImageGeneration,
+            TraceToolActivity::Other => GroupActivity::OtherTool,
+        }),
+        TraceActivity::Agent(activity) => Some(match activity {
+            TraceAgentActivity::Spawn => GroupActivity::AgentSpawn,
+            TraceAgentActivity::Assign => GroupActivity::AgentAssign,
+            TraceAgentActivity::Send => GroupActivity::AgentSend,
+            TraceAgentActivity::Wait => GroupActivity::AgentWait,
+            TraceAgentActivity::Result => GroupActivity::AgentResult,
+            TraceAgentActivity::Resume => GroupActivity::AgentResume,
+            TraceAgentActivity::Close => GroupActivity::AgentClose,
+        }),
+        TraceActivity::CodeCell => Some(GroupActivity::CodeCell),
+        TraceActivity::Compaction(
+            TraceCompactionActivity::Checkpoint
+            | TraceCompactionActivity::Request
+            | TraceCompactionActivity::Marker,
+        ) => Some(GroupActivity::Compaction),
+    }
+}
+
+/// Aggregates activities while allowing terminal poll refinement.
+fn aggregate_activities(values: Vec<GroupActivity>) -> GroupAggregate<GroupActivity> {
+    if values.contains(&GroupActivity::PollTerminal)
+        && values.iter().all(|activity| {
+            matches!(
+                activity,
+                GroupActivity::PollTerminal | GroupActivity::WriteStdin
+            )
+        })
+    {
+        GroupAggregate::Value(GroupActivity::PollTerminal)
+    } else {
+        aggregate(values)
     }
 }
 
@@ -186,7 +249,10 @@ pub(crate) fn completeness(
     {
         return GroupCompleteness::Partial;
     }
-    if kind != GroupKind::DirectTool {
+    if !matches!(
+        kind,
+        GroupKind::DirectTool | GroupKind::Code | GroupKind::Delegation
+    ) {
         return if members.iter().any(|position| {
             facts_at(trace, *position).availability == TraceFactAvailability::Unavailable
         }) {

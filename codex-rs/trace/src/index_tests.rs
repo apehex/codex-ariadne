@@ -19,11 +19,11 @@ fn index_preserves_node_order_for_roots_and_children() {
     let grandchild = locator(TraceNodeKind::ConversationItem, "grandchild");
     let second_child = locator(TraceNodeKind::ToolCall, "second-child");
     let trace = trace(vec![
-        node(session.clone(), None),
+        node(session.clone(), /*parent*/ None),
         node(first_child.clone(), Some(session.clone())),
         node(grandchild, Some(first_child.clone())),
         node(second_child.clone(), Some(session.clone())),
-        node(second_root.clone(), None),
+        node(second_root.clone(), /*parent*/ None),
     ]);
 
     let index = trace.index();
@@ -46,9 +46,9 @@ fn index_preserves_node_order_for_roots_and_children() {
 #[test]
 fn locator_lookup_preserves_first_match_semantics() {
     let duplicate = locator(TraceNodeKind::Turn, "duplicate");
-    let mut first = node(duplicate.clone(), None);
+    let mut first = node(duplicate.clone(), /*parent*/ None);
     first.label = "first".to_string();
-    let mut second = node(duplicate.clone(), None);
+    let mut second = node(duplicate.clone(), /*parent*/ None);
     second.label = "second".to_string();
     let trace = trace(vec![first.clone(), second]);
 
@@ -59,7 +59,7 @@ fn locator_lookup_preserves_first_match_semantics() {
 fn structural_changes_require_rebuilding_the_snapshot() {
     let root = locator(TraceNodeKind::Session, "session");
     let child = locator(TraceNodeKind::Turn, "child");
-    let mut trace = trace(vec![node(root.clone(), None)]);
+    let mut trace = trace(vec![node(root.clone(), /*parent*/ None)]);
     let stale = trace.index();
     trace.nodes.push(node(child.clone(), Some(root.clone())));
 

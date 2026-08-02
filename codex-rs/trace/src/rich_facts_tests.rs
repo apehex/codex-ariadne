@@ -11,12 +11,15 @@ use pretty_assertions::assert_eq;
 
 use super::interaction;
 use super::tool;
+use crate::TraceActivity;
 use crate::TraceCorrelation;
 use crate::TraceFactAvailability;
 use crate::TraceObjectRef;
 use crate::TraceOrder;
 use crate::TraceOwnership;
 use crate::TraceRelation;
+use crate::TraceToolActivity;
+use crate::TraceToolRequester;
 
 #[test]
 fn tool_facts_retain_completion_position_and_runtime_identifiers() {
@@ -45,13 +48,28 @@ fn tool_facts_retain_completion_position_and_runtime_identifiers() {
 
     let facts = tool("tool", &source_tool, TraceFactAvailability::Complete);
 
-    assert_eq!(facts.order, TraceOrder::rich(3, Some(11), 30, Some(110)));
+    assert_eq!(
+        facts.order,
+        TraceOrder::rich(
+            /*started_seq*/ 3,
+            Some(11),
+            /*started_at_unix_ms*/ 30,
+            Some(110),
+        )
+    );
     assert_eq!(
         facts.ownership,
         TraceOwnership {
             thread_id: Some("thread".to_string()),
             turn_id: Some("turn".to_string()),
         }
+    );
+    assert_eq!(
+        facts.policy.activity,
+        Some(TraceActivity::Tool {
+            kind: TraceToolActivity::Web,
+            requester: TraceToolRequester::Model,
+        }),
     );
     assert_eq!(
         facts.correlations,
@@ -102,9 +120,25 @@ fn interaction_facts_use_raw_sequence_and_retain_endpoints() {
         carried_raw_payload_ids: Vec::new(),
     };
 
-    let facts = interaction("edge", &edge, TraceFactAvailability::Complete);
+    let facts = interaction(
+        "edge",
+        &edge,
+        TraceOwnership {
+            thread_id: Some("source".to_string()),
+            turn_id: None,
+        },
+        TraceFactAvailability::Complete,
+    );
 
-    assert_eq!(facts.order, TraceOrder::rich(4, None, 500, Some(100)));
+    assert_eq!(
+        facts.order,
+        TraceOrder::rich(
+            /*started_seq*/ 4,
+            /*ended_seq*/ None,
+            /*started_at_unix_ms*/ 500,
+            Some(100),
+        )
+    );
     assert_eq!(
         facts.correlations,
         vec![

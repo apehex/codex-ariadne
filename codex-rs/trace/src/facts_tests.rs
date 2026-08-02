@@ -13,10 +13,10 @@ use crate::TraceCorrelation;
 
 #[test]
 fn source_comparison_respects_order_domains_and_thread_ownership() {
-    let ordinary_first = ordinary("thread-a", 1);
-    let ordinary_second = ordinary("thread-a", 2);
-    let other_thread = ordinary("thread-b", 2);
-    let rich_first = rich(3);
+    let ordinary_first = ordinary("thread-a", /*ordinal*/ 1);
+    let ordinary_second = ordinary("thread-a", /*ordinal*/ 2);
+    let other_thread = ordinary("thread-b", /*ordinal*/ 2);
+    let rich_first = rich(/*sequence*/ 3);
 
     assert_eq!(
         ordinary_first.source_cmp(&ordinary_second),
@@ -24,7 +24,10 @@ fn source_comparison_respects_order_domains_and_thread_ownership() {
     );
     assert_eq!(ordinary_first.source_cmp(&other_thread), None);
     assert_eq!(ordinary_first.source_cmp(&rich_first), None);
-    assert_eq!(rich_first.source_cmp(&rich(4)), Some(Ordering::Less));
+    assert_eq!(
+        rich_first.source_cmp(&rich(/*sequence*/ 4)),
+        Some(Ordering::Less)
+    );
 }
 
 #[test]
@@ -47,7 +50,7 @@ fn per_node_correlation_limit_marks_truncated_facts_partial() {
 
 fn ordinary(thread_id: &str, ordinal: u64) -> TraceNodeFacts {
     TraceNodeFacts::new(
-        TraceOrder::ordinary(ordinal, None),
+        TraceOrder::ordinary(ordinal, /*wall_clock_start_ms*/ None),
         TraceOwnership {
             thread_id: Some(thread_id.to_string()),
             turn_id: None,
@@ -59,7 +62,10 @@ fn ordinary(thread_id: &str, ordinal: u64) -> TraceNodeFacts {
 
 fn rich(sequence: u64) -> TraceNodeFacts {
     TraceNodeFacts::new(
-        TraceOrder::rich(sequence, None, 0, None),
+        TraceOrder::rich(
+            sequence, /*ended_seq*/ None, /*started_at_unix_ms*/ 0,
+            /*ended_at_unix_ms*/ None,
+        ),
         TraceOwnership::default(),
         TraceFactAvailability::Complete,
         [],

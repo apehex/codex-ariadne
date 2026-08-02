@@ -8,11 +8,14 @@ use codex_rollout_trace::TerminalRequest;
 use pretty_assertions::assert_eq;
 
 use super::operation;
+use crate::TraceActivity;
 use crate::TraceCorrelation;
 use crate::TraceFactAvailability;
 use crate::TraceObjectRef;
 use crate::TraceOwnership;
 use crate::TraceRelation;
+use crate::TraceToolActivity;
+use crate::TraceToolRequester;
 
 #[test]
 fn terminal_operation_retains_runtime_and_model_visible_observations() {
@@ -76,6 +79,13 @@ fn terminal_operation_retains_runtime_and_model_visible_observations() {
                 TraceObjectRef::ConversationItem("output-item".to_string()),
             ),
         ]
+    );
+    assert_eq!(
+        facts.policy.activity,
+        Some(TraceActivity::Tool {
+            kind: TraceToolActivity::PollTerminal,
+            requester: TraceToolRequester::Unknown,
+        }),
     );
 }
 

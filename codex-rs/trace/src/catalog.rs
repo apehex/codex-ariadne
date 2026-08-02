@@ -307,7 +307,7 @@ impl TraceCatalog {
         graph.admit(
             TraceNode::projected(
                 session_locator.clone(),
-                None,
+                /*parent*/ None,
                 summary.source,
                 EvidenceGrade::Reconstructed,
                 summary.created_at.clone(),
@@ -403,7 +403,7 @@ impl TraceCatalog {
                     Some(session_locator.clone()),
                     diagnostic_provenance(diagnostic, entry),
                     diagnostic.evidence,
-                    None,
+                    /*timestamp*/ None,
                     diagnostic.message.clone(),
                     detail,
                 ),

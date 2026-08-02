@@ -136,11 +136,19 @@ pub(crate) fn validate(
         status,
     );
     for group in groups {
-        let expected_anchor = group
+        let member_anchor = group
             .members
             .iter()
             .filter_map(|member| node_bands.get(member.node_position).copied().flatten())
             .min();
+        let child_anchor = group
+            .child_groups
+            .iter()
+            .filter_map(|child| group_positions.get(child))
+            .filter_map(|position| groups.get(*position))
+            .map(|child| child.anchor_band)
+            .min();
+        let expected_anchor = member_anchor.into_iter().chain(child_anchor).min();
         if expected_anchor != Some(group.anchor_band) {
             invalid(
                 diagnostics,
@@ -174,6 +182,17 @@ fn validate_children(
                 invalid(diagnostics, status, "group names a missing child");
             }
             *parent_count.entry(child.clone()).or_default() += 1;
+            if positions
+                .get(child)
+                .and_then(|position| groups.get(*position))
+                .is_some_and(|child| child.scope != group.scope)
+            {
+                invalid(
+                    diagnostics,
+                    status,
+                    "group contains a child from another scope",
+                );
+            }
         }
     }
     if parent_count.values().any(|count| *count > 1) {
@@ -355,8 +374,8 @@ fn invalid(diagnostics: &mut DiagnosticSink, status: &mut PresentationBuildStatu
     *status = PresentationBuildStatus::Incomplete;
     diagnostics.push(
         PresentationDiagnosticCode::InvalidStructure,
-        None,
-        None,
+        /*group_id*/ None,
+        /*node_position*/ None,
         message,
     );
 }

@@ -10,7 +10,7 @@ Make `codex-trace-tui` navigate the materialized presentation index, canonical t
 
 ## Context
 
-This is Phase 4 and depends on the stable group model from [Phase 3](2026-07-30-trace-grouping-policies.md). It implements the lens, reversibility, visibility, and structured-value boundaries from the accepted [presentation-index contract](../../decisions/2026-07-31-trace-presentation-index-contract.md) while intentionally preserving the current visual chrome so semantic and interaction defects are not hidden inside simultaneous layout churn.
+This is Phase 4 and depends on the stable group model from [closed Phase 3](../closed/2026-07-30-trace-grouping-policies.md). It implements the lens, reversibility, visibility, and structured-value boundaries from the accepted [presentation-index contract](../../decisions/2026-07-31-trace-presentation-index-contract.md) while intentionally preserving the current visual chrome so semantic and interaction defects are not hidden inside simultaneous layout churn.
 
 ## Scope
 

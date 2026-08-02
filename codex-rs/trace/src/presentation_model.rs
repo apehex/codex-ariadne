@@ -7,6 +7,9 @@ use crate::TraceOrderDomain;
 use crate::TraceRelation;
 use crate::TraceStatus;
 
+/// Version of the deterministic presentation grouping policy.
+pub const PRESENTATION_POLICY_VERSION: u16 = 1;
+
 /// Snapshot-local scope that owns presentation order.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum PresentationScope {
@@ -32,6 +35,17 @@ pub enum GroupId {
         /// Source-order occurrence when an identity is reused.
         occurrence: u32,
     },
+    /// A versioned higher-order group containing existing child groups.
+    Batch {
+        /// Owning source thread.
+        thread_id: String,
+        /// Higher-order presentation family.
+        kind: GroupKind,
+        /// Policy version that selected the children.
+        policy_version: u16,
+        /// Stable identity of the first child that anchored the batch.
+        first_child: Box<GroupId>,
+    },
 }
 
 /// Minimal renderer-neutral presentation family.
@@ -53,6 +67,8 @@ pub enum GroupKind {
     DeveloperContext,
     /// Direct model/runtime tool lifecycle.
     DirectTool,
+    /// Consecutive read, list, and search tool lifecycles.
+    ExplorationBatch,
     /// Code that lacks a supported direct-tool correlation.
     Code,
     /// Agent/control-plane event deferred to agent-specific policy.
@@ -65,6 +81,47 @@ pub enum GroupKind {
     StructuralRecord,
     /// Visible fallback for an unsupported event family.
     Unknown,
+}
+
+/// Typed operation summarized by a presentation group.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GroupActivity {
+    /// A terminal command.
+    ExecCommand,
+    /// Bytes written to a terminal.
+    WriteStdin,
+    /// A terminal poll.
+    PollTerminal,
+    /// A file patch.
+    ApplyPatch,
+    /// A Model Context Protocol tool.
+    Mcp,
+    /// A web operation.
+    Web,
+    /// Image generation or lookup.
+    ImageGeneration,
+    /// A model-authored code cell.
+    CodeCell,
+    /// Child-agent creation.
+    AgentSpawn,
+    /// Agent assignment or follow-up.
+    AgentAssign,
+    /// Agent messaging.
+    AgentSend,
+    /// Agent waiting.
+    AgentWait,
+    /// Child-agent result delivery.
+    AgentResult,
+    /// Agent resumption.
+    AgentResume,
+    /// Agent close or interruption.
+    AgentClose,
+    /// Context compaction.
+    Compaction,
+    /// Higher-order exploration batch.
+    Exploration,
+    /// Unsupported or dynamic tool operation.
+    OtherTool,
 }
 
 /// Disposition of one canonical node in presentation views.
@@ -201,6 +258,8 @@ pub enum GroupVisibility {
 /// Typed bounded metadata summarized from group members.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GroupMetadata {
+    /// Conservative aggregate typed operation.
+    pub activity: GroupAggregate<GroupActivity>,
     /// Bounded operation or record label.
     pub label: Option<String>,
     /// Bounded first useful member preview.
@@ -211,6 +270,8 @@ pub struct GroupMetadata {
     pub duration_ms: GroupAggregate<u64>,
     /// Number of direct primary members.
     pub member_count: usize,
+    /// Number of direct child groups.
+    pub child_count: usize,
     /// Number of retained secondary references.
     pub reference_count: usize,
     /// Counts of supporting canonical evidence grades.

@@ -28,9 +28,9 @@ This plan introduces a narrow permitted category for the quality-remediation wor
 
 This plan supports Movement 4 of the [quality-remediation plan](2026-07-28-trace-browser-quality-remediation.md) by providing a complex public fixture for rich projection, navigation, lifecycle, presentation, search, and offline/read-only tests.
 
-The fixture is also shared evidence for [closed Phase 1 order and correlation](../closed/2026-07-30-trace-order-and-correlation.md), the [closed Phase 2 presentation index](../closed/2026-07-30-static-trace-presentation-index.md), [Phase 3 grouping policies](2026-07-30-trace-grouping-policies.md), [Phase 4 browser lenses](2026-07-30-trace-browser-lenses-and-structured-navigation.md), and [Phase 6 transcript parity](2026-07-30-codex-transcript-parity.md).
+The fixture is also shared evidence for [closed Phase 1 order and correlation](../closed/2026-07-30-trace-order-and-correlation.md), the [closed Phase 2 presentation index](../closed/2026-07-30-static-trace-presentation-index.md), [closed Phase 3 grouping policies](../closed/2026-07-30-trace-grouping-policies.md), [Phase 4 browser lenses](2026-07-30-trace-browser-lenses-and-structured-navigation.md), and [Phase 6 transcript parity](2026-07-30-codex-transcript-parity.md).
 
-It does not replace the deterministic hand-authored demo, exact-boundary unit fixtures, malformed-input fixtures, or platform containment fixtures required by the quality-remediation plan.
+It does not replace the deterministic hand-authored demo, exact-boundary unit fixtures, malformed-input fixtures, or platform containment fixtures required by the quality-remediation plan. Closed Phase 3 intentionally used a hand-authored topology fixture; this separate plan remains future evidence and was not a prerequisite for grouping-policy closure.
 
 It does not expand authority to implement the Phase 7 or 8 parent integration, change recording or protocol formats, publish a release, push commits, or ingest other real conversations.
 

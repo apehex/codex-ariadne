@@ -52,7 +52,7 @@ pub(crate) fn thread(
             thread.execution.ended_at_unix_ms,
         ),
         Some(id),
-        None,
+        /*turn_id*/ None,
         availability,
         correlations,
     )
@@ -97,7 +97,12 @@ pub(crate) fn conversation_item(
             .map(|producer| link(TraceRelation::Producer, producer_ref(producer))),
     );
     facts(
-        TraceOrder::rich(item.first_seen_seq, None, item.first_seen_at_unix_ms, None),
+        TraceOrder::rich(
+            item.first_seen_seq,
+            /*ended_seq*/ None,
+            item.first_seen_at_unix_ms,
+            /*ended_at_unix_ms*/ None,
+        ),
         Some(&item.thread_id),
         item.codex_turn_id.as_deref(),
         availability,
@@ -208,6 +213,7 @@ pub(crate) fn tool(
         availability,
         correlations,
     )
+    .with_activity(crate::presentation_facts::rich_tool(tool))
 }
 
 pub(crate) fn code_cell(
@@ -249,6 +255,7 @@ pub(crate) fn code_cell(
         availability,
         correlations,
     )
+    .with_activity(crate::TraceActivity::CodeCell)
 }
 
 pub(crate) fn compaction(
@@ -282,15 +289,18 @@ pub(crate) fn compaction(
     facts(
         TraceOrder::rich(
             compaction.installed_seq,
-            None,
+            /*ended_seq*/ None,
             compaction.installed_at_unix_ms,
-            None,
+            /*ended_at_unix_ms*/ None,
         ),
         Some(&compaction.thread_id),
         Some(&compaction.codex_turn_id),
         availability,
         correlations,
     )
+    .with_activity(crate::TraceActivity::Compaction(
+        crate::TraceCompactionActivity::Checkpoint,
+    ))
 }
 
 pub(crate) fn compaction_request(
@@ -312,11 +322,15 @@ pub(crate) fn compaction_request(
         availability,
         correlations,
     )
+    .with_activity(crate::TraceActivity::Compaction(
+        crate::TraceCompactionActivity::Request,
+    ))
 }
 
 pub(crate) fn interaction(
     id: &str,
     edge: &InteractionEdge,
+    ownership: TraceOwnership,
     availability: TraceFactAvailability,
 ) -> TraceNodeFacts {
     let mut correlations = identity(TraceObjectRef::InteractionEdge(id.to_string()));
@@ -338,15 +352,16 @@ pub(crate) fn interaction(
     facts(
         TraceOrder::rich(
             edge.started_seq,
-            None,
+            /*ended_seq*/ None,
             edge.started_at_unix_ms,
             edge.ended_at_unix_ms,
         ),
-        None,
-        None,
+        ownership.thread_id.as_deref(),
+        ownership.turn_id.as_deref(),
         availability,
         correlations,
     )
+    .with_activity(crate::presentation_facts::interaction(&edge.kind))
 }
 
 pub(crate) fn raw_payload(id: &str) -> TraceNodeFacts {

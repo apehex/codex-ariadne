@@ -11,7 +11,7 @@ The accepted presentation program is materialized as separate open plans so each
 1. [Phase 0: Trace Presentation Architecture Contract](plans/closed/2026-07-30-trace-presentation-architecture-contract.md) froze evidence, ordering, grouping, view, bounds, and integration decisions in the accepted [presentation-index contract](decisions/2026-07-31-trace-presentation-index-contract.md).
 2. [Phase 1: Trace Order And Correlation](plans/closed/2026-07-30-trace-order-and-correlation.md) retains typed source-order and correlation facts.
 3. [Phase 2: Static Trace Presentation Index](plans/closed/2026-07-30-static-trace-presentation-index.md) materializes the minimal renderer-neutral partition.
-4. [Phase 3: Trace Grouping Policies](plans/open/2026-07-30-trace-grouping-policies.md) implements deterministic lifecycle, agent, compaction, and higher-order grouping.
+4. [Phase 3: Trace Grouping Policies](plans/closed/2026-07-30-trace-grouping-policies.md) implements deterministic lifecycle, agent, compaction, and higher-order grouping.
 5. [Phase 4: Trace Browser Lenses And Structured Navigation](plans/open/2026-07-30-trace-browser-lenses-and-structured-navigation.md) exposes grouped, expanded, structural, thread, member, and JSON navigation.
 6. [Phase 5: Borderless Horizontal Trace Surface](plans/open/2026-07-30-borderless-horizontal-trace-surface.md) applies the full-body visual surface and horizontal viewport.
 7. [Phase 6: Codex Transcript Parity](plans/open/2026-07-30-codex-transcript-parity.md) compares Ariadne groups with the current parent transcript.

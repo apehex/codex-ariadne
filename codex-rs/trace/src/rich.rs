@@ -282,7 +282,12 @@ impl<'a> RichProjector<'a> {
                 id,
                 parent: self.session_locator.clone(),
                 timestamp: Some(edge.started_at_unix_ms.to_string()),
-                facts: rich_facts::interaction(id, edge, self.fact_availability),
+                facts: rich_facts::interaction(
+                    id,
+                    edge,
+                    interaction_ownership(trace, edge),
+                    self.fact_availability,
+                ),
                 label: format!("interaction {:?}", edge.kind),
                 value: edge,
                 evidence: self.semantic_evidence,
@@ -325,6 +330,37 @@ impl<'a> RichProjector<'a> {
     /// Builds a stable rich-source locator beneath this selected session.
     fn locator(&self, kind: TraceNodeKind, id: &str) -> TraceNodeLocator {
         TraceNodeLocator::new(self.session_id, kind, id)
+    }
+}
+
+/// Derives the owning parent thread from typed interaction endpoints.
+fn interaction_ownership(
+    trace: &codex_rollout_trace::RolloutTrace,
+    edge: &codex_rollout_trace::InteractionEdge,
+) -> crate::TraceOwnership {
+    let tool = [&edge.source, &edge.target].into_iter().find_map(|anchor| {
+        let codex_rollout_trace::TraceAnchor::ToolCall { tool_call_id } = anchor else {
+            return None;
+        };
+        trace.tool_calls.get(tool_call_id)
+    });
+    if let Some(tool) = tool {
+        return crate::TraceOwnership {
+            thread_id: Some(tool.thread_id.clone()),
+            turn_id: tool.started_by_codex_turn_id.clone(),
+        };
+    }
+    let thread_id = match &edge.source {
+        codex_rollout_trace::TraceAnchor::Thread { thread_id } => Some(thread_id.clone()),
+        codex_rollout_trace::TraceAnchor::ConversationItem { item_id } => trace
+            .conversation_items
+            .get(item_id)
+            .map(|item| item.thread_id.clone()),
+        codex_rollout_trace::TraceAnchor::ToolCall { .. } => None,
+    };
+    crate::TraceOwnership {
+        thread_id,
+        turn_id: None,
     }
 }
 

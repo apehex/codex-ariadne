@@ -23,7 +23,14 @@ const GRANDCHILD_ID: &str = "019d0000-0000-7000-8000-000000000003";
 #[tokio::test]
 async fn ordinary_threads_form_a_searchable_tree_and_preserve_diagnostics() {
     let temp = TempDir::new().unwrap();
-    write_rollout(temp.path(), ROOT_ID, ROOT_ID, None, "hello from root", None);
+    write_rollout(
+        temp.path(),
+        ROOT_ID,
+        ROOT_ID,
+        /*parent*/ None,
+        "hello from root",
+        /*extra_line*/ None,
+    );
     write_rollout(
         temp.path(),
         ROOT_ID,
@@ -38,7 +45,7 @@ async fn ordinary_threads_form_a_searchable_tree_and_preserve_diagnostics() {
         GRANDCHILD_ID,
         Some(CHILD_ID),
         "hello from grandchild",
-        None,
+        /*extra_line*/ None,
     );
 
     let catalog = TraceRepository::new(temp.path().to_path_buf())
@@ -108,7 +115,7 @@ async fn orphan_and_cycle_threads_remain_reachable_from_the_session() {
         ROOT_ID,
         Some(CHILD_ID),
         "cycle a",
-        None,
+        /*extra_line*/ None,
     );
     write_rollout(
         temp.path(),
@@ -116,7 +123,7 @@ async fn orphan_and_cycle_threads_remain_reachable_from_the_session() {
         CHILD_ID,
         Some(ROOT_ID),
         "cycle b",
-        None,
+        /*extra_line*/ None,
     );
     let orphan_id = "019d0000-0000-7000-8000-000000000003";
     let missing_id = "019d0000-0000-7000-8000-000000000004";
@@ -126,7 +133,7 @@ async fn orphan_and_cycle_threads_remain_reachable_from_the_session() {
         orphan_id,
         Some(missing_id),
         "orphan",
-        None,
+        /*extra_line*/ None,
     );
 
     let catalog = TraceRepository::new(temp.path().to_path_buf())
@@ -161,8 +168,22 @@ async fn orphan_and_cycle_threads_remain_reachable_from_the_session() {
 #[tokio::test]
 async fn upstream_session_topology_keeps_lineage_distinct_from_containment() {
     let temp = TempDir::new().unwrap();
-    write_rollout(temp.path(), ROOT_ID, ROOT_ID, None, "root", None);
-    write_rollout(temp.path(), ROOT_ID, CHILD_ID, Some(ROOT_ID), "child", None);
+    write_rollout(
+        temp.path(),
+        ROOT_ID,
+        ROOT_ID,
+        /*parent*/ None,
+        "root",
+        /*extra_line*/ None,
+    );
+    write_rollout(
+        temp.path(),
+        ROOT_ID,
+        CHILD_ID,
+        Some(ROOT_ID),
+        "child",
+        /*extra_line*/ None,
+    );
     let child_path = temp.path().join(format!(
         "sessions/2026/07/25/rollout-2026-07-25T00-00-00-{CHILD_ID}.jsonl"
     ));
@@ -185,9 +206,9 @@ async fn upstream_session_topology_keeps_lineage_distinct_from_containment() {
         temp.path(),
         GRANDCHILD_ID,
         GRANDCHILD_ID,
-        None,
+        /*parent*/ None,
         "independent fork",
-        None,
+        /*extra_line*/ None,
     );
 
     let catalog = TraceRepository::new(temp.path().to_path_buf())
@@ -228,7 +249,14 @@ async fn upstream_session_topology_keeps_lineage_distinct_from_containment() {
 #[tokio::test]
 async fn ordinary_records_follow_numeric_ordinals_despite_timestamp_regression() {
     let temp = TempDir::new().unwrap();
-    write_rollout(temp.path(), ROOT_ID, ROOT_ID, None, "placeholder", None);
+    write_rollout(
+        temp.path(),
+        ROOT_ID,
+        ROOT_ID,
+        /*parent*/ None,
+        "placeholder",
+        /*extra_line*/ None,
+    );
     let path = temp.path().join(format!(
         "sessions/2026/07/25/rollout-2026-07-25T00-00-00-{ROOT_ID}.jsonl"
     ));
@@ -412,14 +440,21 @@ async fn rich_turn_children_follow_raw_event_sequence_across_node_kinds() {
 #[tokio::test]
 async fn cross_session_parent_ids_do_not_merge_independent_sessions() {
     let temp = TempDir::new().unwrap();
-    write_rollout(temp.path(), ROOT_ID, ROOT_ID, None, "first session", None);
+    write_rollout(
+        temp.path(),
+        ROOT_ID,
+        ROOT_ID,
+        /*parent*/ None,
+        "first session",
+        /*extra_line*/ None,
+    );
     write_rollout(
         temp.path(),
         GRANDCHILD_ID,
         CHILD_ID,
         Some(ROOT_ID),
         "second session",
-        None,
+        /*extra_line*/ None,
     );
 
     let catalog = TraceRepository::new(temp.path().to_path_buf())
@@ -449,9 +484,9 @@ async fn matching_ordinary_and_rich_sources_merge_without_node_loss() {
         temp.path(),
         ROOT_ID,
         ROOT_ID,
-        None,
+        /*parent*/ None,
         "ordinary evidence",
-        None,
+        /*extra_line*/ None,
     );
     let bundle = temp.path().join("rich/bundle");
     let writer = TraceWriter::create(
@@ -502,9 +537,9 @@ async fn duplicate_ordinary_observations_are_retained_with_stable_parentage() {
         temp.path(),
         ROOT_ID,
         ROOT_ID,
-        None,
+        /*parent*/ None,
         "first observation",
-        None,
+        /*extra_line*/ None,
     );
     let source = temp.path().join(format!(
         "sessions/2026/07/25/rollout-2026-07-25T00-00-00-{ROOT_ID}.jsonl"
@@ -564,7 +599,14 @@ async fn duplicate_ordinary_observations_are_retained_with_stable_parentage() {
 #[tokio::test]
 async fn selected_session_materialization_is_bounded_and_visible_as_a_diagnostic() {
     let temp = TempDir::new().unwrap();
-    write_rollout(temp.path(), ROOT_ID, ROOT_ID, None, "bounded record", None);
+    write_rollout(
+        temp.path(),
+        ROOT_ID,
+        ROOT_ID,
+        /*parent*/ None,
+        "bounded record",
+        /*extra_line*/ None,
+    );
     let limits = TraceLimits {
         max_nodes_per_session: 3,
         ..TraceLimits::default()
@@ -633,9 +675,9 @@ async fn mismatched_rich_root_is_a_conflicting_diagnostic() {
         temp.path(),
         ROOT_ID,
         ROOT_ID,
-        None,
+        /*parent*/ None,
         "ordinary evidence",
-        None,
+        /*extra_line*/ None,
     );
     let bundle = temp.path().join("rich/bundle");
     let writer = TraceWriter::create(
@@ -820,7 +862,7 @@ async fn payload_reader_contains_paths_sanitizes_controls_and_caps_reads() {
     };
     assert!(
         reader
-            .read(&escaped, PayloadReadLimit::new(3))
+            .read(&escaped, PayloadReadLimit::new(/*bytes*/ 3))
             .await
             .unwrap_err()
             .to_string()

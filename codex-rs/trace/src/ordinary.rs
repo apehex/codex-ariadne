@@ -137,10 +137,12 @@ pub(crate) async fn load_thread(
             thread_detail,
         ),
         TraceNodeFacts::new(
-            parse_timestamp_millis(&thread.timestamp)
-                .map_or_else(TraceOrder::default, |timestamp| {
-                    TraceOrder::structural(timestamp, None)
-                }),
+            parse_timestamp_millis(&thread.timestamp).map_or_else(
+                TraceOrder::default,
+                |timestamp| {
+                    TraceOrder::structural(timestamp, /*ended_at_unix_ms*/ None)
+                },
+            ),
             TraceOwnership {
                 thread_id: Some(thread.thread_id.clone()),
                 turn_id: None,

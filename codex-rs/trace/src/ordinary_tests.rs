@@ -11,13 +11,13 @@ use crate::catalog::OrdinaryThread;
 fn bounded_line_retains_exact_limit_and_recovers_after_oversized_line() {
     let mut input = Cursor::new(b"1234\noversized\nok\n");
 
-    let exact = read_bounded_line(&mut input, 4)
+    let exact = read_bounded_line(&mut input, /*limit*/ 4)
         .expect("exact line")
         .expect("line");
-    let oversized = read_bounded_line(&mut input, 4)
+    let oversized = read_bounded_line(&mut input, /*limit*/ 4)
         .expect("oversized line")
         .expect("line");
-    let following = read_bounded_line(&mut input, 4)
+    let following = read_bounded_line(&mut input, /*limit*/ 4)
         .expect("following line")
         .expect("line");
 
@@ -36,10 +36,10 @@ fn bounded_line_retains_exact_limit_and_recovers_after_oversized_line() {
 fn bounded_line_supports_zero_byte_limit() {
     let mut input = Cursor::new(b"x\n\n");
 
-    let nonempty = read_bounded_line(&mut input, 0)
+    let nonempty = read_bounded_line(&mut input, /*limit*/ 0)
         .expect("nonempty line")
         .expect("line");
-    let empty = read_bounded_line(&mut input, 0)
+    let empty = read_bounded_line(&mut input, /*limit*/ 0)
         .expect("empty line")
         .expect("line");
 
@@ -50,7 +50,7 @@ fn bounded_line_supports_zero_byte_limit() {
 #[test]
 fn topology_resolves_deep_same_session_ancestry() {
     let threads = vec![
-        thread("session", "root", None),
+        thread("session", "root", /*parent_thread_id*/ None),
         thread("session", "child", Some("root")),
         thread("session", "grandchild", Some("child")),
     ];
@@ -64,8 +64,8 @@ fn topology_resolves_deep_same_session_ancestry() {
 #[test]
 fn topology_rejects_conflicting_duplicate_parent_observations() {
     let threads = vec![
-        thread("session", "root-a", None),
-        thread("session", "root-b", None),
+        thread("session", "root-a", /*parent_thread_id*/ None),
+        thread("session", "root-b", /*parent_thread_id*/ None),
         thread("session", "parent", Some("root-a")),
         thread("session", "parent", Some("root-b")),
         thread("session", "child", Some("parent")),
@@ -84,7 +84,7 @@ fn topology_rejects_conflicting_duplicate_parent_observations() {
 #[test]
 fn topology_rejects_cross_session_parent_and_cycles() {
     let threads = vec![
-        thread("other", "foreign", None),
+        thread("other", "foreign", /*parent_thread_id*/ None),
         thread("session", "cross", Some("foreign")),
         thread("session", "cycle-a", Some("cycle-b")),
         thread("session", "cycle-b", Some("cycle-a")),

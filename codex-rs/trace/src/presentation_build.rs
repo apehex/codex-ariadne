@@ -43,6 +43,7 @@ pub(crate) fn build(trace: &SessionTrace) -> PresentationIndex {
         &order.scope_events,
         &mut diagnostics,
     );
+    crate::presentation_hierarchy::add_hierarchy(trace, &mut groups, &mut diagnostics);
     let mut primary_groups = vec![None; trace.nodes.len()];
     groups.sort_by(|left, right| left.id.cmp(&right.id));
     let group_positions = groups
@@ -56,7 +57,14 @@ pub(crate) fn build(trace: &SessionTrace) -> PresentationIndex {
         }
     }
     let mut scope_groups = BTreeMap::<PresentationScope, Vec<usize>>::new();
+    let child_groups = groups
+        .iter()
+        .flat_map(|group| group.child_groups.iter().cloned())
+        .collect::<std::collections::HashSet<_>>();
     for (position, group) in groups.iter().enumerate() {
+        if child_groups.contains(&group.id) {
+            continue;
+        }
         scope_groups
             .entry(group.scope.clone())
             .or_default()
@@ -138,7 +146,7 @@ fn materialize_groups(
             .map(|position| scope(&facts_at(trace, *position)))
             .unwrap_or(PresentationScope::Session);
         let kind = match &id {
-            GroupId::Correlated { .. } => GroupKind::DirectTool,
+            GroupId::Correlated { kind, .. } | GroupId::Batch { kind, .. } => *kind,
             GroupId::Singleton(_) => positions
                 .first()
                 .map(|position| presentation_policy::group_kind(&trace.nodes[*position]))
@@ -185,6 +193,7 @@ fn materialize_groups(
             trace,
             kind,
             &positions,
+            /*child_count*/ 0,
             references.values.len(),
             summary_remaining.min(MAX_SUMMARY_BYTES),
             MAX_PREVIEW_CHARS,

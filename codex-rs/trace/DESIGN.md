@@ -72,7 +72,20 @@ The accepted [presentation-index contract](../../.ariadne/decisions/2026-07-31-t
 
 The implemented static index owns primary group membership, bounded secondary references, partial-order bands, typed aggregate metadata, completeness, persisted origin, visibility defaults, and bounded derived diagnostics. It retains canonical node positions and locators rather than cloning complete detail values or raw payloads. The browser constructs one snapshot beside `TraceIndex` while installing a selected session; mutation of nodes, locators, or typed facts requires an explicit rebuild.
 
-The minimal policy creates singleton groups for messages, context, reasoning, diagnostics, compactions, delegation records, structural event records, and unknown presentable records. Direct tool inputs, runtime objects, and outputs join only through typed model-visible or runtime-tool identities. Reused model-visible call IDs receive source-order occurrence numbers; ambiguous, cross-thread, or delegation correlations remain visible as singleton groups with bounded diagnostics. Exploration batches, agent and wait lifecycles, compaction reduction, terminal-specific policies, and other higher-order families remain Phase 3 work.
+Presentation grouping policy version 1 derives a small typed activity at each ordinary or rich source adapter. It classifies terminal command/write/poll, patch, MCP, web, image, code-cell, agent, interaction, and compaction observations without reopening arbitrary node detail JSON. The shared Codex shell parser marks a command exploration-eligible only when its non-empty parsed actions consist entirely of reads, file listings, or searches.
+
+Lifecycle membership uses durable model-call, runtime-tool, terminal-operation, code-cell, interaction, or compaction identities. It never uses timestamps, labels, previews, or nearest-neighbor matching. Reused ordinary call IDs receive source-order occurrence numbers; ambiguous and cross-thread identities remain visible through singleton degradation and bounded diagnostics. Tool sessions and raw payloads are reference-only because several lifecycles may refer to them.
+
+| Family | Identity and primary membership | Children or references | Failure behavior |
+| --- | --- | --- | --- |
+| Direct terminal, patch, MCP, web, image, or dynamic tool | Thread plus runtime tool ID, or model-call occurrence when no runtime ID exists | Terminal sessions and raw artifacts remain references | Orphan or ambiguous evidence remains partial, indeterminate, or singleton |
+| Code cell | Thread plus code-cell ID; source and output items join the cell | Runtime tools requested by the cell remain independent child groups | Missing cells leave nested tools top-level with a diagnostic |
+| Agent lifecycle | Thread plus agent tool ID; interaction edges join through tool endpoints, otherwise use edge identity | Child threads and carried items remain navigable references | Missing or cross-scope endpoints are retained without proximity inference |
+| Compaction | Thread plus compaction ID; checkpoint, marker, and requests join | Input and replacement history remain in their original groups and become references | Missing referenced history marks the group partial |
+| Exploration batch | Thread, policy version, and first eligible child group | Consecutive model-requested read/list/search tool groups are children | Single children remain top-level; any non-eligible group anchor flushes the batch |
+| Unsupported event | Canonical singleton locator | Existing typed references remain available | Always remains visible rather than being dropped |
+
+Nested code-cell tools are excluded from exploration batching so one group never has two containing parents. Higher-order batches have no copied canonical members: expanded events continue to name their lifecycle group, while collapsed scope queries omit child groups and return the container. Batch summaries use typed activity and counts without adding free-form text to the global summary budget.
 
 Canonical order is a partial order. Ordinary ordinals and rich raw-event sequences retain their source meaning; stable correlations align equivalent observations; incomparable cross-source intervals remain explicitly unordered; and wall-clock timestamps never determine event position. Session-wide synchronization is available only when rich global sequence evidence supports it.
 
@@ -80,9 +93,9 @@ Every primary presentable event belongs to exactly one primary group. Sessions, 
 
 The default structural limits are derived from the retained node count `N`: at most `2N` groups, `3N` direct membership entries, `4N` secondary references with at most 4,096 per group, nesting depth 4, 4 KiB per free-form summary, and 16 MiB total summary text. Presentation diagnostics, previews, and structured-value navigation use the additional exact caps in the accepted decision.
 
-Static construction belongs in selected-session loading and is bounded by retained nodes, memberships, references, summaries, and diagnostics. Indexed lookup by group, canonical node, scope, or band does not scan the complete trace, parse arbitrary node detail, or open raw payloads. Incremental live reduction remains Phase 7 work.
+Static construction belongs in selected-session loading and is bounded by retained nodes, memberships, references, summaries, and diagnostics. Indexed lookup by group, canonical node, scope, or band does not scan the complete trace, parse arbitrary node detail, or open raw payloads. The exploration reducer accepts ordered facts in arbitrary chunks and produces the same completed containers; origin-aware live canonical admission and public incremental snapshots remain Phase 7 work.
 
-The presentation types contain no Ratatui lines, styles, widths, wrapping, key bindings, overlays, parent `HistoryCell`s, or app-server clients. Batch and incremental reduction of the same completed typed facts must produce deeply equal snapshots except for explicitly transient live state.
+The presentation types contain no Ratatui lines, styles, widths, wrapping, key bindings, overlays, parent `HistoryCell`s, or app-server clients. Parent `ExecCell` behavior is a parity oracle only: its all-read/list/search rule and incompatible-cell flush boundary are reproduced through shared typed parsing rather than importing TUI state.
 
 ## Search
 

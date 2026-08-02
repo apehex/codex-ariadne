@@ -147,3 +147,7 @@ pub(crate) struct PresentationIndexParts {
 #[cfg(test)]
 #[path = "presentation_index_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "presentation_grouping_tests.rs"]
+mod grouping_tests;

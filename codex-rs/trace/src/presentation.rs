@@ -33,7 +33,7 @@ impl TraceRecordPresentation {
         let channel = find_string(detail, &["channel"]).and_then(parse_channel);
         let class = classify_record(kind, role, channel, detail);
         let status = find_string(detail, &["status", "outcome"]).and_then(parse_status);
-        let preview = preview_text(detail).map(|text| one_line_preview(&text, 256));
+        let preview = preview_text(detail).map(|text| one_line_preview(&text, /*limit*/ 256));
         Self {
             class,
             role,

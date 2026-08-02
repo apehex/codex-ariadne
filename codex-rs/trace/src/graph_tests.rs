@@ -260,7 +260,7 @@ fn correlations_are_bounded_globally_and_report_saturation_once() {
 
 fn ordinary_facts(ordinal: u64) -> TraceNodeFacts {
     TraceNodeFacts::new(
-        TraceOrder::ordinary(ordinal, None),
+        TraceOrder::ordinary(ordinal, /*wall_clock_start_ms*/ None),
         TraceOwnership {
             thread_id: Some("thread".to_string()),
             turn_id: None,

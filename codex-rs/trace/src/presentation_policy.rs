@@ -15,11 +15,12 @@ pub(crate) fn disposition(node: &TraceNode) -> PresentationDisposition {
         | TraceNodeKind::Thread
         | TraceNodeKind::Turn
         | TraceNodeKind::Inference => PresentationDisposition::StructuralOnly,
-        TraceNodeKind::RawPayload => PresentationDisposition::ReferenceOnly,
+        TraceNodeKind::RawPayload | TraceNodeKind::TerminalSession => {
+            PresentationDisposition::ReferenceOnly
+        }
         TraceNodeKind::ConversationItem
         | TraceNodeKind::ToolCall
         | TraceNodeKind::CodeCell
-        | TraceNodeKind::TerminalSession
         | TraceNodeKind::TerminalOperation
         | TraceNodeKind::Compaction
         | TraceNodeKind::CompactionRequest
@@ -100,6 +101,7 @@ pub(crate) fn default_visibility(kind: GroupKind) -> GroupVisibility {
         | GroupKind::FinalAnswer
         | GroupKind::Reasoning
         | GroupKind::DirectTool
+        | GroupKind::ExplorationBatch
         | GroupKind::Code
         | GroupKind::Delegation
         | GroupKind::Diagnostic
@@ -110,12 +112,15 @@ pub(crate) fn default_visibility(kind: GroupKind) -> GroupVisibility {
 pub(crate) fn direct_tool_candidate(node: &TraceNode) -> bool {
     matches!(
         node.presentation.class,
-        TraceRecordClass::ToolInput | TraceRecordClass::ToolOutput | TraceRecordClass::Code
+        TraceRecordClass::ToolInput
+            | TraceRecordClass::ToolOutput
+            | TraceRecordClass::Code
+            | TraceRecordClass::Delegation
     ) || matches!(
         node.locator.kind,
         TraceNodeKind::ToolCall
             | TraceNodeKind::CodeCell
             | TraceNodeKind::TerminalOperation
-            | TraceNodeKind::TerminalSession
+            | TraceNodeKind::InteractionEdge
     )
 }
