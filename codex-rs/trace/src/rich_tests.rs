@@ -5,15 +5,15 @@ use codex_rollout_trace::AgentThread;
 use codex_rollout_trace::ExecutionStatus;
 use codex_rollout_trace::ExecutionWindow;
 
-use super::rich_parent_is_valid;
+use super::topology::parent_is_valid;
 
 #[test]
 fn rich_parent_validation_accepts_roots_and_rejects_missing_or_cyclic_chains() {
     let mut threads = BTreeMap::new();
     threads.insert("root".to_string(), thread("root", AgentOrigin::Root));
     threads.insert("child".to_string(), thread("child", spawned_from("root")));
-    assert!(rich_parent_is_valid("child", "root", &threads));
-    assert!(!rich_parent_is_valid("orphan", "missing", &threads));
+    assert!(parent_is_valid("child", "root", &threads));
+    assert!(!parent_is_valid("orphan", "missing", &threads));
     threads.insert(
         "orphan".to_string(),
         thread("orphan", spawned_from("missing")),
@@ -22,7 +22,7 @@ fn rich_parent_validation_accepts_roots_and_rejects_missing_or_cyclic_chains() {
         "orphan-child".to_string(),
         thread("orphan-child", spawned_from("orphan")),
     );
-    assert!(rich_parent_is_valid("orphan-child", "orphan", &threads));
+    assert!(parent_is_valid("orphan-child", "orphan", &threads));
 
     threads.insert(
         "cycle-a".to_string(),
@@ -36,9 +36,9 @@ fn rich_parent_validation_accepts_roots_and_rejects_missing_or_cyclic_chains() {
         "cycle-child".to_string(),
         thread("cycle-child", spawned_from("cycle-a")),
     );
-    assert!(!rich_parent_is_valid("cycle-a", "cycle-b", &threads));
-    assert!(rich_parent_is_valid("cycle-b", "cycle-a", &threads));
-    assert!(rich_parent_is_valid("cycle-child", "cycle-a", &threads));
+    assert!(!parent_is_valid("cycle-a", "cycle-b", &threads));
+    assert!(parent_is_valid("cycle-b", "cycle-a", &threads));
+    assert!(parent_is_valid("cycle-child", "cycle-a", &threads));
 }
 
 fn spawned_from(parent_thread_id: &str) -> AgentOrigin {

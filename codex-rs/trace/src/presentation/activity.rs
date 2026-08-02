@@ -176,5 +176,5 @@ fn exploration(command: &[String]) -> TraceExplorationEligibility {
 }
 
 #[cfg(test)]
-#[path = "presentation_facts_tests.rs"]
+#[path = "activity_tests.rs"]
 mod tests;

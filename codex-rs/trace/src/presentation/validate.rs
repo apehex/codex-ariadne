@@ -3,6 +3,9 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 
+use super::BuildContext;
+use super::DiagnosticSink;
+use super::PresentationDiagnosticCode;
 use crate::GroupId;
 use crate::OrderBandId;
 use crate::PresentationBuildStatus;
@@ -10,13 +13,10 @@ use crate::PresentationDisposition;
 use crate::PresentationGroup;
 use crate::PresentationOrderBand;
 use crate::PresentationScope;
-use crate::SessionTrace;
-use crate::presentation_build::DiagnosticSink;
-use crate::presentation_model::PresentationDiagnosticCode;
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn validate(
-    trace: &SessionTrace,
+    context: &BuildContext<'_>,
     groups: &[PresentationGroup],
     primary_groups: &[Option<usize>],
     dispositions: &[PresentationDisposition],
@@ -25,6 +25,8 @@ pub(crate) fn validate(
     diagnostics: &mut DiagnosticSink,
     status: &mut PresentationBuildStatus,
 ) {
+    let trace = context.trace();
+    let limits = context.limits();
     let node_count = trace.nodes.len();
     let primary_count = dispositions
         .iter()
@@ -66,8 +68,10 @@ pub(crate) fn validate(
         .iter()
         .map(|group| group.references.len())
         .sum::<usize>();
-    if reference_count > node_count.saturating_mul(4)
-        || groups.iter().any(|group| group.references.len() > 4_096)
+    if reference_count > node_count.saturating_mul(limits.max_references_per_node)
+        || groups
+            .iter()
+            .any(|group| group.references.len() > limits.max_references_per_group)
     {
         invalid(
             diagnostics,
@@ -106,7 +110,7 @@ pub(crate) fn validate(
                     "primary membership reverse lookup disagrees",
                 );
             }
-            if scope_for_position(trace, member.node_position) != group.scope {
+            if context.scope_at(member.node_position) != group.scope {
                 invalid(
                     diagnostics,
                     status,
@@ -125,7 +129,13 @@ pub(crate) fn validate(
             );
         }
     }
-    validate_children(groups, &group_positions, diagnostics, status);
+    validate_children(
+        groups,
+        &group_positions,
+        limits.max_group_depth,
+        diagnostics,
+        status,
+    );
     let node_bands = validate_order(
         node_count,
         groups,
@@ -172,6 +182,7 @@ pub(crate) fn validate(
 fn validate_children(
     groups: &[PresentationGroup],
     positions: &HashMap<GroupId, usize>,
+    max_depth: usize,
     diagnostics: &mut DiagnosticSink,
     status: &mut PresentationBuildStatus,
 ) {
@@ -204,11 +215,11 @@ fn validate_children(
     }
     for group in groups {
         let mut path = HashSet::new();
-        if depth(group, groups, positions, &mut path) > 4 {
+        if depth(group, groups, positions, &mut path) > max_depth.max(1) {
             invalid(
                 diagnostics,
                 status,
-                "group nesting is cyclic or exceeds depth four",
+                "group nesting is cyclic or exceeds its configured depth",
             );
             break;
         }
@@ -357,17 +368,6 @@ fn validate_order(
         }
     }
     node_bands
-}
-
-fn scope_for_position(trace: &SessionTrace, position: usize) -> PresentationScope {
-    trace
-        .nodes
-        .get(position)
-        .and_then(|node| trace.facts.get(&node.locator))
-        .and_then(|facts| facts.ownership.thread_id.as_ref())
-        .map_or(PresentationScope::Session, |thread| {
-            PresentationScope::Thread(thread.clone())
-        })
 }
 
 fn invalid(diagnostics: &mut DiagnosticSink, status: &mut PresentationBuildStatus, message: &str) {

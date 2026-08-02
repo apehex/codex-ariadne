@@ -1,8 +1,8 @@
 //! Bounded group references, metadata, and completeness reduction.
 
-use std::collections::HashMap;
-use std::collections::HashSet;
-
+use super::BuildContext;
+use super::bounded_text::truncate_chars;
+use super::bounded_text::truncate_utf8;
 use crate::EvidenceGrade;
 use crate::GroupActivity;
 use crate::GroupAggregate;
@@ -10,24 +10,13 @@ use crate::GroupCompleteness;
 use crate::GroupEvidenceCounts;
 use crate::GroupKind;
 use crate::GroupMetadata;
-use crate::GroupReference;
-use crate::SessionTrace;
 use crate::TraceActivity;
 use crate::TraceAgentActivity;
 use crate::TraceCompactionActivity;
 use crate::TraceFactAvailability;
-use crate::TraceNodeFacts;
-use crate::TraceObjectRef;
 use crate::TraceRecordClass;
-use crate::TraceRelation;
 use crate::TraceStatus;
 use crate::TraceToolActivity;
-
-pub(crate) struct ReferenceResult {
-    pub(crate) values: Vec<GroupReference>,
-    pub(crate) missing: bool,
-    pub(crate) truncated: bool,
-}
 
 pub(crate) struct SummaryResult {
     pub(crate) metadata: GroupMetadata,
@@ -36,74 +25,8 @@ pub(crate) struct SummaryResult {
     pub(crate) truncated: bool,
 }
 
-pub(crate) fn references(
-    trace: &SessionTrace,
-    members: &[usize],
-    identity_positions: &HashMap<TraceObjectRef, Vec<usize>>,
-    group_limit: usize,
-    global_remaining: usize,
-) -> ReferenceResult {
-    let member_set = members.iter().copied().collect::<HashSet<_>>();
-    let limit = group_limit.min(global_remaining);
-    let mut values = Vec::new();
-    let mut missing = false;
-    let mut truncated = false;
-    let mut observed = HashSet::new();
-    for position in members {
-        let facts = facts_at(trace, *position);
-        for correlation in facts
-            .correlations
-            .iter()
-            .filter(|correlation| is_secondary(correlation.relation, &correlation.target))
-        {
-            let resolved = identity_positions.get(&correlation.target);
-            let external = resolved
-                .into_iter()
-                .flatten()
-                .copied()
-                .filter(|position| !member_set.contains(position))
-                .collect::<Vec<_>>();
-            if external.is_empty() {
-                if resolved.is_none() && expects_canonical_target(&correlation.target) {
-                    missing = true;
-                }
-                retain_reference(
-                    GroupReference {
-                        relation: correlation.relation,
-                        target: correlation.target.clone(),
-                        node_position: None,
-                    },
-                    limit,
-                    &mut values,
-                    &mut observed,
-                    &mut truncated,
-                );
-            } else {
-                for target_position in external {
-                    retain_reference(
-                        GroupReference {
-                            relation: correlation.relation,
-                            target: correlation.target.clone(),
-                            node_position: Some(target_position),
-                        },
-                        limit,
-                        &mut values,
-                        &mut observed,
-                        &mut truncated,
-                    );
-                }
-            }
-        }
-    }
-    ReferenceResult {
-        values,
-        missing,
-        truncated,
-    }
-}
-
 pub(crate) fn summarize(
-    trace: &SessionTrace,
+    context: &BuildContext<'_>,
     kind: GroupKind,
     members: &[usize],
     child_count: usize,
@@ -111,6 +34,7 @@ pub(crate) fn summarize(
     text_budget: usize,
     preview_chars: usize,
 ) -> SummaryResult {
+    let trace = context.trace();
     let mut remaining = text_budget;
     let mut truncated = false;
     let label_source = members
@@ -147,7 +71,7 @@ pub(crate) fn summarize(
         if let Some(status) = node.presentation.status {
             statuses.push(status);
         }
-        let facts = facts_at(trace, *position);
+        let facts = context.facts_at(*position);
         if let Some(activity) = facts.policy.activity.and_then(group_activity) {
             activities.push(activity);
         }
@@ -229,15 +153,16 @@ fn aggregate_activities(values: Vec<GroupActivity>) -> GroupAggregate<GroupActiv
 }
 
 pub(crate) fn completeness(
-    trace: &SessionTrace,
+    context: &BuildContext<'_>,
     kind: GroupKind,
     members: &[usize],
     missing_reference: bool,
 ) -> GroupCompleteness {
+    let trace = context.trace();
     let conflicting = members.iter().any(|position| {
         trace.nodes.get(*position).is_some_and(|node| {
             node.evidence == EvidenceGrade::Conflicting
-                || facts_at(trace, *position).availability == TraceFactAvailability::Conflicting
+                || context.facts_at(*position).availability == TraceFactAvailability::Conflicting
         })
     });
     if conflicting || missing_reference {
@@ -245,7 +170,7 @@ pub(crate) fn completeness(
     }
     if members
         .iter()
-        .any(|position| facts_at(trace, *position).availability == TraceFactAvailability::Partial)
+        .any(|position| context.facts_at(*position).availability == TraceFactAvailability::Partial)
     {
         return GroupCompleteness::Partial;
     }
@@ -254,7 +179,7 @@ pub(crate) fn completeness(
         GroupKind::DirectTool | GroupKind::Code | GroupKind::Delegation
     ) {
         return if members.iter().any(|position| {
-            facts_at(trace, *position).availability == TraceFactAvailability::Unavailable
+            context.facts_at(*position).availability == TraceFactAvailability::Unavailable
         }) {
             GroupCompleteness::Indeterminate
         } else {
@@ -272,7 +197,7 @@ pub(crate) fn completeness(
     let has_result = members.iter().any(|position| {
         trace.nodes.get(*position).is_some_and(|node| {
             node.presentation.class == TraceRecordClass::ToolOutput
-                || facts_at(trace, *position).order.end.is_some()
+                || context.facts_at(*position).order.end.is_some()
                 || matches!(
                     node.presentation.status,
                     Some(TraceStatus::Completed | TraceStatus::Failed | TraceStatus::Aborted)
@@ -295,108 +220,4 @@ fn aggregate<T: Copy + Eq>(values: Vec<T>) -> GroupAggregate<T> {
     } else {
         GroupAggregate::Conflicting
     }
-}
-
-fn is_secondary(relation: TraceRelation, target: &TraceObjectRef) -> bool {
-    match (relation, target) {
-        (TraceRelation::SourceIdentity | TraceRelation::ModelVisibleCall, _) => false,
-        (TraceRelation::Producer | TraceRelation::OwningTool, TraceObjectRef::ToolCall(_)) => false,
-        (
-            TraceRelation::ModelVisibleCallItem
-            | TraceRelation::ModelVisibleOutputItem
-            | TraceRelation::CodeSource
-            | TraceRelation::CodeOutput
-            | TraceRelation::ToolTerminalOperation
-            | TraceRelation::CreatedByTerminalOperation,
-            _,
-        ) => false,
-        (
-            TraceRelation::ParentThread
-            | TraceRelation::SpawnEdge
-            | TraceRelation::TurnInput
-            | TraceRelation::Producer
-            | TraceRelation::OwningTool
-            | TraceRelation::InferenceInput
-            | TraceRelation::InferenceOutput
-            | TraceRelation::InferenceStartedTool
-            | TraceRelation::RequestingCodeCell
-            | TraceRelation::NestedTool
-            | TraceRelation::WaitTool
-            | TraceRelation::TerminalSessionOperation
-            | TraceRelation::TerminalSession
-            | TraceRelation::TerminalObservationCall
-            | TraceRelation::TerminalObservationOutput
-            | TraceRelation::CompactionRequest
-            | TraceRelation::CompactionMarker
-            | TraceRelation::CompactionInput
-            | TraceRelation::CompactionReplacement
-            | TraceRelation::OwningCompaction
-            | TraceRelation::InteractionSource
-            | TraceRelation::InteractionTarget
-            | TraceRelation::InteractionCarriedItem
-            | TraceRelation::RawPayload,
-            _,
-        ) => true,
-    }
-}
-
-fn expects_canonical_target(target: &TraceObjectRef) -> bool {
-    !matches!(
-        target,
-        TraceObjectRef::UserInput
-            | TraceObjectRef::Harness
-            | TraceObjectRef::ModelVisibleCall(_)
-            | TraceObjectRef::McpCall(_)
-            | TraceObjectRef::CodeModeRuntimeTool(_)
-    )
-}
-
-fn retain_reference(
-    reference: GroupReference,
-    limit: usize,
-    values: &mut Vec<GroupReference>,
-    observed: &mut HashSet<(TraceRelation, TraceObjectRef, Option<usize>)>,
-    truncated: &mut bool,
-) {
-    let key = (
-        reference.relation,
-        reference.target.clone(),
-        reference.node_position,
-    );
-    if !observed.insert(key) {
-        return;
-    }
-    if values.len() < limit {
-        values.push(reference);
-    } else {
-        *truncated = true;
-    }
-}
-
-fn truncate_utf8(text: &str, byte_limit: usize) -> (String, bool) {
-    if text.len() <= byte_limit {
-        return (text.to_string(), false);
-    }
-    let mut end = byte_limit.min(text.len());
-    while !text.is_char_boundary(end) {
-        end = end.saturating_sub(1);
-    }
-    (text[..end].to_string(), true)
-}
-
-fn truncate_chars(text: &str, char_limit: usize) -> (String, bool) {
-    if text.chars().count() <= char_limit {
-        (text.to_string(), false)
-    } else {
-        (text.chars().take(char_limit).collect(), true)
-    }
-}
-
-fn facts_at(trace: &SessionTrace, position: usize) -> TraceNodeFacts {
-    trace
-        .nodes
-        .get(position)
-        .and_then(|node| trace.facts.get(&node.locator))
-        .cloned()
-        .unwrap_or_default()
 }

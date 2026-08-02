@@ -16,8 +16,10 @@ use crate::TraceNodeFacts;
 use crate::TraceNodeKind;
 use crate::TraceNodeLocator;
 use crate::payload::BundlePayload;
-use crate::rich_facts;
-use crate::rich_terminal_facts;
+mod fact_support;
+mod facts;
+mod terminal_facts;
+mod topology;
 
 /// Projects one reduced rich trace through a source-specific projection context.
 #[allow(clippy::too_many_arguments)]
@@ -90,7 +92,7 @@ impl<'a> RichProjector<'a> {
                 AgentOrigin::Root => self.session_locator.clone(),
                 AgentOrigin::Spawned {
                     parent_thread_id, ..
-                } if rich_parent_is_valid(id, parent_thread_id, &trace.threads) => {
+                } if topology::parent_is_valid(id, parent_thread_id, &trace.threads) => {
                     self.locator(TraceNodeKind::Thread, parent_thread_id)
                 }
                 AgentOrigin::Spawned {
@@ -112,7 +114,7 @@ impl<'a> RichProjector<'a> {
                 id,
                 parent,
                 timestamp: Some(thread.execution.started_at_unix_ms.to_string()),
-                facts: rich_facts::thread(id, thread, self.fact_availability),
+                facts: facts::thread(id, thread, self.fact_availability),
                 label: format!("thread {}", thread.agent_path),
                 value: thread,
                 evidence: self.semantic_evidence,
@@ -124,7 +126,7 @@ impl<'a> RichProjector<'a> {
                 id,
                 parent: self.locator(TraceNodeKind::Thread, &turn.thread_id),
                 timestamp: Some(turn.execution.started_at_unix_ms.to_string()),
-                facts: rich_facts::turn(id, turn, self.fact_availability),
+                facts: facts::turn(id, turn, self.fact_availability),
                 label: format!("turn {id}"),
                 value: turn,
                 evidence: self.semantic_evidence,
@@ -140,7 +142,7 @@ impl<'a> RichProjector<'a> {
                 id,
                 parent,
                 timestamp: Some(item.first_seen_at_unix_ms.to_string()),
-                facts: rich_facts::conversation_item(id, item, self.fact_availability),
+                facts: facts::conversation_item(id, item, self.fact_availability),
                 label: format!("conversation {:?}", item.kind),
                 value: item,
                 evidence: self.semantic_evidence,
@@ -152,7 +154,7 @@ impl<'a> RichProjector<'a> {
                 id,
                 parent: self.locator(TraceNodeKind::Turn, &inference.codex_turn_id),
                 timestamp: Some(inference.execution.started_at_unix_ms.to_string()),
-                facts: rich_facts::inference(id, inference, self.fact_availability),
+                facts: facts::inference(id, inference, self.fact_availability),
                 label: format!("inference {}", inference.model),
                 value: inference,
                 evidence: self.semantic_evidence,
@@ -168,7 +170,7 @@ impl<'a> RichProjector<'a> {
                 id,
                 parent,
                 timestamp: Some(tool.execution.started_at_unix_ms.to_string()),
-                facts: rich_facts::tool(id, tool, self.fact_availability),
+                facts: facts::tool(id, tool, self.fact_availability),
                 label: format!("tool {:?}", tool.kind),
                 value: tool,
                 evidence: self.semantic_evidence,
@@ -180,7 +182,7 @@ impl<'a> RichProjector<'a> {
                 id,
                 parent: self.locator(TraceNodeKind::Turn, &cell.codex_turn_id),
                 timestamp: Some(cell.execution.started_at_unix_ms.to_string()),
-                facts: rich_facts::code_cell(id, cell, self.fact_availability),
+                facts: facts::code_cell(id, cell, self.fact_availability),
                 label: format!("code cell {id}"),
                 value: cell,
                 evidence: self.semantic_evidence,
@@ -193,7 +195,7 @@ impl<'a> RichProjector<'a> {
                 id,
                 parent: self.session_locator.clone(),
                 timestamp: None,
-                facts: rich_facts::raw_payload(id),
+                facts: facts::raw_payload(id),
                 label: format!("payload {:?}", reference.kind),
                 value: reference,
                 evidence: EvidenceGrade::Exact,
@@ -219,7 +221,7 @@ impl<'a> RichProjector<'a> {
                 id,
                 parent: self.locator(TraceNodeKind::Turn, &compaction.codex_turn_id),
                 timestamp: Some(compaction.installed_at_unix_ms.to_string()),
-                facts: rich_facts::compaction(id, compaction, self.fact_availability),
+                facts: facts::compaction(id, compaction, self.fact_availability),
                 label: format!("compaction {id}"),
                 value: compaction,
                 evidence: self.semantic_evidence,
@@ -231,7 +233,7 @@ impl<'a> RichProjector<'a> {
                 id,
                 parent: self.locator(TraceNodeKind::Compaction, &request.compaction_id),
                 timestamp: Some(request.execution.started_at_unix_ms.to_string()),
-                facts: rich_facts::compaction_request(id, request, self.fact_availability),
+                facts: facts::compaction_request(id, request, self.fact_availability),
                 label: format!("compaction request {}", request.model),
                 value: request,
                 evidence: self.semantic_evidence,
@@ -250,12 +252,7 @@ impl<'a> RichProjector<'a> {
                 id,
                 parent: self.locator(TraceNodeKind::ToolCall, &operation.tool_call_id),
                 timestamp: Some(operation.execution.started_at_unix_ms.to_string()),
-                facts: rich_terminal_facts::operation(
-                    id,
-                    operation,
-                    ownership,
-                    self.fact_availability,
-                ),
+                facts: terminal_facts::operation(id, operation, ownership, self.fact_availability),
                 label: format!("terminal operation {:?}", operation.kind),
                 value: operation,
                 evidence: self.semantic_evidence,
@@ -270,7 +267,7 @@ impl<'a> RichProjector<'a> {
                     &terminal.created_by_operation_id,
                 ),
                 timestamp: Some(terminal.execution.started_at_unix_ms.to_string()),
-                facts: rich_terminal_facts::session(id, terminal, self.fact_availability),
+                facts: terminal_facts::session(id, terminal, self.fact_availability),
                 label: format!("terminal {id}"),
                 value: terminal,
                 evidence: self.semantic_evidence,
@@ -282,10 +279,10 @@ impl<'a> RichProjector<'a> {
                 id,
                 parent: self.session_locator.clone(),
                 timestamp: Some(edge.started_at_unix_ms.to_string()),
-                facts: rich_facts::interaction(
+                facts: facts::interaction(
                     id,
                     edge,
-                    interaction_ownership(trace, edge),
+                    topology::interaction_ownership(trace, edge),
                     self.fact_availability,
                 ),
                 label: format!("interaction {:?}", edge.kind),
@@ -333,37 +330,6 @@ impl<'a> RichProjector<'a> {
     }
 }
 
-/// Derives the owning parent thread from typed interaction endpoints.
-fn interaction_ownership(
-    trace: &codex_rollout_trace::RolloutTrace,
-    edge: &codex_rollout_trace::InteractionEdge,
-) -> crate::TraceOwnership {
-    let tool = [&edge.source, &edge.target].into_iter().find_map(|anchor| {
-        let codex_rollout_trace::TraceAnchor::ToolCall { tool_call_id } = anchor else {
-            return None;
-        };
-        trace.tool_calls.get(tool_call_id)
-    });
-    if let Some(tool) = tool {
-        return crate::TraceOwnership {
-            thread_id: Some(tool.thread_id.clone()),
-            turn_id: tool.started_by_codex_turn_id.clone(),
-        };
-    }
-    let thread_id = match &edge.source {
-        codex_rollout_trace::TraceAnchor::Thread { thread_id } => Some(thread_id.clone()),
-        codex_rollout_trace::TraceAnchor::ConversationItem { item_id } => trace
-            .conversation_items
-            .get(item_id)
-            .map(|item| item.thread_id.clone()),
-        codex_rollout_trace::TraceAnchor::ToolCall { .. } => None,
-    };
-    crate::TraceOwnership {
-        thread_id,
-        turn_id: None,
-    }
-}
-
 /// Complete inputs for one rich-node admission.
 struct RichNodeSpec<'a, T> {
     kind: TraceNodeKind,
@@ -374,36 +340,6 @@ struct RichNodeSpec<'a, T> {
     label: String,
     value: &'a T,
     evidence: EvidenceGrade,
-}
-
-/// Returns whether a rich parent chain exists and admits this cycle member.
-fn rich_parent_is_valid(
-    thread_id: &str,
-    parent_thread_id: &str,
-    threads: &BTreeMap<String, codex_rollout_trace::AgentThread>,
-) -> bool {
-    if !threads.contains_key(parent_thread_id) {
-        return false;
-    }
-    let mut current = parent_thread_id;
-    let mut path = vec![thread_id];
-    loop {
-        if let Some(cycle_start) = path.iter().position(|id| *id == current) {
-            let cycle = &path[cycle_start..];
-            let cut = cycle.iter().copied().min();
-            return !cycle.contains(&thread_id) || cut != Some(thread_id);
-        }
-        path.push(current);
-        let Some(parent) = threads.get(current) else {
-            return true;
-        };
-        match &parent.origin {
-            AgentOrigin::Root => return true,
-            AgentOrigin::Spawned {
-                parent_thread_id, ..
-            } => current = parent_thread_id,
-        }
-    }
 }
 
 #[cfg(test)]

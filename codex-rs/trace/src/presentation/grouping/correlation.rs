@@ -3,12 +3,15 @@
 use std::collections::BTreeSet;
 use std::collections::HashMap;
 
+use super::owners::CorrelationIndex;
+use super::owners::code_cell_id;
+use super::owners::compaction_id;
+use super::owners::exact_tool_id;
 use crate::GroupId;
 use crate::GroupKind;
 use crate::PresentationDiagnosticCode;
 use crate::PresentationDisposition;
 use crate::PresentationScope;
-use crate::SessionTrace;
 use crate::TraceActivity;
 use crate::TraceNodeFacts;
 use crate::TraceNodeKind;
@@ -16,15 +19,9 @@ use crate::TraceObjectRef;
 use crate::TraceOrderDomain;
 use crate::TraceRecordClass;
 use crate::TraceRelation;
-use crate::presentation_build::DiagnosticSink;
-use crate::presentation_owners::code_cell_id;
-use crate::presentation_owners::code_items;
-use crate::presentation_owners::compaction_id;
-use crate::presentation_owners::compaction_items;
-use crate::presentation_owners::exact_tool_id;
-use crate::presentation_owners::operation_tools;
-use crate::presentation_owners::tool_kinds;
-use crate::presentation_policy;
+use crate::presentation::BuildContext;
+use crate::presentation::DiagnosticSink;
+use crate::presentation::policy;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 struct CallOccurrence {
@@ -34,10 +31,11 @@ struct CallOccurrence {
 }
 
 pub(crate) fn assign_primary_groups(
-    trace: &SessionTrace,
+    context: &BuildContext<'_>,
     dispositions: &[PresentationDisposition],
     diagnostics: &mut DiagnosticSink,
 ) -> Vec<Option<GroupId>> {
+    let trace = context.trace();
     let mut ids = vec![None; trace.nodes.len()];
     let primary = dispositions
         .iter()
@@ -46,28 +44,26 @@ pub(crate) fn assign_primary_groups(
             (*disposition == PresentationDisposition::Primary).then_some(position)
         })
         .collect::<Vec<_>>();
-    let invocation_occurrences = invocation_occurrences(trace, &primary);
-    let unique_call_occurrences = unique_call_occurrences(trace, &invocation_occurrences);
-    let item_occurrences = invocation_item_occurrences(trace, &invocation_occurrences);
+    let invocation_occurrences = invocation_occurrences(context, &primary);
+    let unique_call_occurrences = unique_call_occurrences(context, &invocation_occurrences);
+    let item_occurrences = invocation_item_occurrences(context, &invocation_occurrences);
     let (item_tools, occurrence_tools, ambiguous_tools) = tool_bridges(
-        trace,
+        context,
         &primary,
         &item_occurrences,
         &unique_call_occurrences,
         diagnostics,
     );
-    let operation_tools = operation_tools(trace, &primary);
-    let tool_kinds = tool_kinds(trace, &primary);
-    let code_items = code_items(trace, &primary);
-    let compaction_items = compaction_items(trace, &primary);
+    let correlations = CorrelationIndex::new(context, &primary);
 
     for position in primary {
         let node = &trace.nodes[position];
-        let facts = facts_at(trace, position);
-        let scope = scope(&facts);
+        let facts = context.facts_at(position);
+        let scope = context.scope_at(position);
         let singleton = || GroupId::Singleton(node.locator.clone());
-        if let Some(compaction) = compaction_id(&facts).or_else(|| {
-            source_identity(&facts).and_then(|item| compaction_items.get(&item).cloned())
+        if let Some(compaction) = compaction_id(facts).or_else(|| {
+            source_identity(facts)
+                .and_then(|item| correlations.compaction_items.get(&item).cloned())
         }) {
             ids[position] = correlated_id(
                 &scope,
@@ -78,9 +74,9 @@ pub(crate) fn assign_primary_groups(
             .or_else(|| Some(singleton()));
             continue;
         }
-        if let Some(code_cell) = code_cell_id(&facts)
-            .or_else(|| source_identity(&facts).and_then(|item| code_items.get(&item).cloned()))
-        {
+        if let Some(code_cell) = code_cell_id(facts).or_else(|| {
+            source_identity(facts).and_then(|item| correlations.code_items.get(&item).cloned())
+        }) {
             ids[position] = correlated_id(
                 &scope,
                 GroupKind::Code,
@@ -90,17 +86,17 @@ pub(crate) fn assign_primary_groups(
             .or_else(|| Some(singleton()));
             continue;
         }
-        if !presentation_policy::direct_tool_candidate(node) {
+        if !policy::direct_tool_candidate(node) {
             ids[position] = Some(singleton());
             continue;
         }
-        let exact_tool = exact_tool_id(&facts)
+        let exact_tool = exact_tool_id(facts)
             .or_else(|| {
-                source_identity(&facts).and_then(|identity| item_tools.get(&identity).cloned())
+                source_identity(facts).and_then(|identity| item_tools.get(&identity).cloned())
             })
             .or_else(|| {
-                created_operation_id(&facts)
-                    .and_then(|operation| operation_tools.get(&operation).cloned())
+                created_operation_id(facts)
+                    .and_then(|operation| correlations.operation_tools.get(&operation).cloned())
             });
         if let Some(tool_id) = exact_tool {
             if ambiguous_tools.contains(&tool_id) {
@@ -112,10 +108,11 @@ pub(crate) fn assign_primary_groups(
                 );
                 ids[position] = Some(singleton());
             } else {
-                let kind = tool_kinds
+                let kind = correlations
+                    .tool_kinds
                     .get(&tool_id)
                     .copied()
-                    .unwrap_or_else(|| fact_group_kind(node, &facts));
+                    .unwrap_or_else(|| fact_group_kind(node, facts));
                 ids[position] = correlated_id(
                     &scope,
                     kind,
@@ -126,9 +123,9 @@ pub(crate) fn assign_primary_groups(
             }
             continue;
         }
-        let Some(call_id) = model_call_id(&facts) else {
+        let Some(call_id) = model_call_id(facts) else {
             if node.locator.kind == TraceNodeKind::InteractionEdge
-                && let Some(TraceObjectRef::InteractionEdge(edge_id)) = source_identity(&facts)
+                && let Some(TraceObjectRef::InteractionEdge(edge_id)) = source_identity(facts)
             {
                 ids[position] = correlated_id(
                     &scope,
@@ -169,11 +166,12 @@ pub(crate) fn assign_primary_groups(
             .map(TraceObjectRef::ToolCall)
             .unwrap_or(TraceObjectRef::ModelVisibleCall(call_id));
         let kind = match &correlation {
-            TraceObjectRef::ToolCall(tool_id) => tool_kinds
+            TraceObjectRef::ToolCall(tool_id) => correlations
+                .tool_kinds
                 .get(tool_id)
                 .copied()
-                .unwrap_or_else(|| fact_group_kind(node, &facts)),
-            _ => fact_group_kind(node, &facts),
+                .unwrap_or_else(|| fact_group_kind(node, facts)),
+            _ => fact_group_kind(node, facts),
         };
         ids[position] =
             correlated_id(&scope, kind, correlation, occurrence).or_else(|| Some(singleton()));
@@ -181,16 +179,21 @@ pub(crate) fn assign_primary_groups(
     ids
 }
 
-fn invocation_occurrences(trace: &SessionTrace, primary: &[usize]) -> HashMap<usize, u32> {
+fn invocation_occurrences(context: &BuildContext<'_>, primary: &[usize]) -> HashMap<usize, u32> {
+    let trace = context.trace();
     let mut calls = HashMap::<(PresentationScope, TraceOrderDomain, String), Vec<usize>>::new();
     for position in primary {
         let node = &trace.nodes[*position];
-        let facts = facts_at(trace, *position);
+        let facts = context.facts_at(*position);
         if node.presentation.class == TraceRecordClass::ToolInput
-            && let Some(call_id) = model_call_id(&facts)
+            && let Some(call_id) = model_call_id(facts)
         {
             calls
-                .entry((scope(&facts), facts.order.start.domain(), call_id))
+                .entry((
+                    context.scope_at(*position),
+                    facts.order.start.domain(),
+                    call_id,
+                ))
                 .or_default()
                 .push(*position);
         }
@@ -198,10 +201,10 @@ fn invocation_occurrences(trace: &SessionTrace, primary: &[usize]) -> HashMap<us
     let mut occurrences = HashMap::new();
     for positions in calls.values_mut() {
         positions.sort_by(|left, right| {
-            let left_facts = facts_at(trace, *left);
-            let right_facts = facts_at(trace, *right);
+            let left_facts = context.facts_at(*left);
+            let right_facts = context.facts_at(*right);
             left_facts
-                .source_cmp(&right_facts)
+                .source_cmp(right_facts)
                 .unwrap_or(std::cmp::Ordering::Equal)
                 .then(left_facts.order.tie_break.cmp(&right_facts.order.tie_break))
                 .then(left.cmp(right))
@@ -209,7 +212,7 @@ fn invocation_occurrences(trace: &SessionTrace, primary: &[usize]) -> HashMap<us
         let mut last_order = None;
         let mut occurrence = 0_u32;
         for position in positions {
-            let order = facts_at(trace, *position).order.start;
+            let order = context.facts_at(*position).order.start;
             if last_order.is_some_and(|last| last != order) {
                 occurrence = occurrence.saturating_add(1);
             }
@@ -221,26 +224,26 @@ fn invocation_occurrences(trace: &SessionTrace, primary: &[usize]) -> HashMap<us
 }
 
 fn invocation_item_occurrences(
-    trace: &SessionTrace,
+    context: &BuildContext<'_>,
     occurrences: &HashMap<usize, u32>,
 ) -> HashMap<TraceObjectRef, CallOccurrence> {
     let mut candidates = HashMap::<TraceObjectRef, BTreeSet<CallOccurrence>>::new();
-    for position in 0..trace.nodes.len() {
+    for position in 0..context.trace().nodes.len() {
         let Some(occurrence) = occurrences.get(&position) else {
             continue;
         };
-        let facts = facts_at(trace, position);
-        let Some(identity) = source_identity(&facts) else {
+        let facts = context.facts_at(position);
+        let Some(identity) = source_identity(facts) else {
             continue;
         };
-        let Some(call_id) = model_call_id(&facts) else {
+        let Some(call_id) = model_call_id(facts) else {
             continue;
         };
         candidates
             .entry(identity)
             .or_default()
             .insert(CallOccurrence {
-                scope: scope(&facts),
+                scope: context.scope_at(position),
                 call_id,
                 occurrence: *occurrence,
             });
@@ -257,17 +260,17 @@ fn invocation_item_occurrences(
 }
 
 fn unique_call_occurrences(
-    trace: &SessionTrace,
+    context: &BuildContext<'_>,
     occurrences: &HashMap<usize, u32>,
 ) -> HashMap<(PresentationScope, String), Option<u32>> {
     let mut unique = HashMap::new();
     for (position, occurrence) in occurrences {
-        let facts = facts_at(trace, *position);
-        let Some(call_id) = model_call_id(&facts) else {
+        let facts = context.facts_at(*position);
+        let Some(call_id) = model_call_id(facts) else {
             continue;
         };
         unique
-            .entry((scope(&facts), call_id))
+            .entry((context.scope_at(*position), call_id))
             .and_modify(|retained| {
                 if *retained != Some(*occurrence) {
                     *retained = None;
@@ -280,7 +283,7 @@ fn unique_call_occurrences(
 
 #[allow(clippy::type_complexity)]
 fn tool_bridges(
-    trace: &SessionTrace,
+    context: &BuildContext<'_>,
     primary: &[usize],
     item_occurrences: &HashMap<TraceObjectRef, CallOccurrence>,
     unique_call_occurrences: &HashMap<(PresentationScope, String), Option<u32>>,
@@ -290,6 +293,7 @@ fn tool_bridges(
     HashMap<CallOccurrence, String>,
     BTreeSet<String>,
 ) {
+    let trace = context.trace();
     let mut item_tools = HashMap::new();
     let mut ambiguous_items = BTreeSet::new();
     let mut occurrence_tools = HashMap::new();
@@ -300,17 +304,17 @@ fn tool_bridges(
         if node.locator.kind != TraceNodeKind::ToolCall {
             continue;
         }
-        let facts = facts_at(trace, *position);
-        let Some(tool_id) = source_tool_id(&facts) else {
+        let facts = context.facts_at(*position);
+        let Some(tool_id) = source_tool_id(facts) else {
             continue;
         };
-        let scope = scope(&facts);
+        let scope = context.scope_at(*position);
         tool_scopes
             .entry(tool_id.clone())
             .or_default()
             .insert(scope.clone());
         let mut occurrence = None;
-        for item in exact_tool_items(&facts) {
+        for item in exact_tool_items(facts) {
             if !ambiguous_items.contains(&item)
                 && let Some(previous) = item_tools.insert(item.clone(), tool_id.clone())
                 && previous != tool_id
@@ -329,7 +333,7 @@ fn tool_bridges(
             }
         }
         if occurrence.is_none()
-            && let Some(call_id) = model_call_id(&facts)
+            && let Some(call_id) = model_call_id(facts)
             && let Some(Some(unique_occurrence)) =
                 unique_call_occurrences.get(&(scope.clone(), call_id.clone()))
         {
@@ -396,7 +400,7 @@ fn fact_group_kind(node: &crate::TraceNode, facts: &TraceNodeFacts) -> GroupKind
         Some(TraceActivity::Agent(_)) => GroupKind::Delegation,
         Some(TraceActivity::CodeCell) => GroupKind::Code,
         Some(TraceActivity::Compaction(_)) => GroupKind::Compaction,
-        Some(TraceActivity::Tool { .. }) | None => presentation_policy::group_kind(node),
+        Some(TraceActivity::Tool { .. }) | None => policy::group_kind(node),
     }
 }
 
@@ -435,23 +439,4 @@ fn created_operation_id(facts: &TraceNodeFacts) -> Option<String> {
             _ => None,
         }
     })
-}
-
-fn facts_at(trace: &SessionTrace, position: usize) -> TraceNodeFacts {
-    trace
-        .nodes
-        .get(position)
-        .and_then(|node| trace.facts.get(&node.locator))
-        .cloned()
-        .unwrap_or_default()
-}
-
-fn scope(facts: &TraceNodeFacts) -> PresentationScope {
-    facts
-        .ownership
-        .thread_id
-        .as_ref()
-        .map_or(PresentationScope::Session, |thread_id| {
-            PresentationScope::Thread(thread_id.clone())
-        })
 }

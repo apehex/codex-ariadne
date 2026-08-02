@@ -3,47 +3,46 @@
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 
+use super::BuildContext;
+use super::DiagnosticSink;
+use super::PresentationLimits;
+use super::index::PresentationIndexParts;
+use super::policy;
 use crate::GroupId;
 use crate::GroupKind;
 use crate::GroupMember;
 use crate::GroupOrigin;
 use crate::PresentationBuildStatus;
-use crate::PresentationDiagnostic;
 use crate::PresentationDiagnosticCode;
 use crate::PresentationGroup;
 use crate::PresentationIndex;
 use crate::PresentationScope;
 use crate::SessionTrace;
-use crate::TraceNodeFacts;
-use crate::TraceObjectRef;
-use crate::TraceRelation;
-use crate::presentation_index::PresentationIndexParts;
-use crate::presentation_policy;
 
-const MAX_REFERENCES_PER_GROUP: usize = 4_096;
-const MAX_SUMMARY_BYTES: usize = 4 * 1_024;
-const MAX_TOTAL_SUMMARY_BYTES: usize = 16 * 1_024 * 1_024;
-const MAX_PREVIEW_CHARS: usize = 256;
-
-pub(crate) fn build(trace: &SessionTrace) -> PresentationIndex {
+pub(crate) fn build(trace: &SessionTrace, limits: PresentationLimits) -> PresentationIndex {
+    let context = BuildContext::new(trace, limits);
+    let limits = context.limits();
     let dispositions = trace
         .nodes
         .iter()
-        .map(presentation_policy::disposition)
+        .map(policy::disposition)
         .collect::<Vec<_>>();
-    let mut diagnostics = DiagnosticSink::new(trace.nodes.len());
-    let primary_ids =
-        crate::presentation_tools::assign_primary_groups(trace, &dispositions, &mut diagnostics);
-    let mut order = crate::presentation_order::build_order(trace, &primary_ids);
+    let mut diagnostics = DiagnosticSink::new(trace.nodes.len(), limits);
+    let primary_ids = super::grouping::correlation::assign_primary_groups(
+        &context,
+        &dispositions,
+        &mut diagnostics,
+    );
+    let mut order = super::order::build_order(&context, &primary_ids);
     diagnostics.extend(order.diagnostics.drain(..));
     let mut groups = materialize_groups(
-        trace,
+        &context,
         &primary_ids,
         &order.band_by_node,
         &order.scope_events,
         &mut diagnostics,
     );
-    crate::presentation_hierarchy::add_hierarchy(trace, &mut groups, &mut diagnostics);
+    super::grouping::hierarchy::add_hierarchy(&context, &mut groups, &mut diagnostics);
     let mut primary_groups = vec![None; trace.nodes.len()];
     groups.sort_by(|left, right| left.id.cmp(&right.id));
     let group_positions = groups
@@ -88,8 +87,8 @@ pub(crate) fn build(trace: &SessionTrace) -> PresentationIndex {
     }
 
     let mut status = PresentationBuildStatus::Complete;
-    crate::presentation_validate::validate(
-        trace,
+    super::validate::validate(
+        &context,
         &groups,
         &primary_groups,
         &dispositions,
@@ -112,12 +111,14 @@ pub(crate) fn build(trace: &SessionTrace) -> PresentationIndex {
 }
 
 fn materialize_groups(
-    trace: &SessionTrace,
+    context: &BuildContext<'_>,
     primary_ids: &[Option<GroupId>],
     band_by_node: &[Option<crate::OrderBandId>],
     scope_events: &BTreeMap<PresentationScope, Vec<crate::PresentationEvent>>,
     diagnostics: &mut DiagnosticSink,
 ) -> Vec<PresentationGroup> {
+    let trace = context.trace();
+    let limits = context.limits();
     let mut members = BTreeMap::<GroupId, Vec<usize>>::new();
     for (position, group_id) in primary_ids.iter().enumerate() {
         if let Some(group_id) = group_id {
@@ -130,26 +131,29 @@ fn materialize_groups(
         .enumerate()
         .map(|(rank, event)| (event.node_position, rank))
         .collect::<HashMap<_, _>>();
-    let identity_positions = identity_positions(trace);
-    let global_reference_limit = trace.nodes.len().saturating_mul(4);
+    let global_reference_limit = trace
+        .nodes
+        .len()
+        .saturating_mul(limits.max_references_per_node);
     let mut retained_references = 0;
     let group_count = members.len();
-    let summary_limit = MAX_SUMMARY_BYTES
+    let summary_limit = limits
+        .max_summary_bytes_per_group
         .saturating_mul(group_count)
-        .min(MAX_TOTAL_SUMMARY_BYTES);
+        .min(limits.max_total_summary_bytes);
     let mut retained_summary_bytes = 0;
     let mut groups = Vec::with_capacity(group_count);
     for (id, mut positions) in members {
         positions.sort_by_key(|position| event_rank.get(position).copied().unwrap_or(usize::MAX));
         let scope = positions
             .first()
-            .map(|position| scope(&facts_at(trace, *position)))
+            .map(|position| context.scope_at(*position))
             .unwrap_or(PresentationScope::Session);
         let kind = match &id {
             GroupId::Correlated { kind, .. } | GroupId::Batch { kind, .. } => *kind,
             GroupId::Singleton(_) => positions
                 .first()
-                .map(|position| presentation_policy::group_kind(&trace.nodes[*position]))
+                .map(|position| policy::group_kind(&trace.nodes[*position]))
                 .unwrap_or(GroupKind::Unknown),
         };
         let anchor_band = positions
@@ -161,14 +165,13 @@ fn materialize_groups(
             .iter()
             .map(|position| GroupMember {
                 node_position: *position,
-                role: presentation_policy::member_role(&trace.nodes[*position]),
+                role: policy::member_role(&trace.nodes[*position]),
             })
             .collect::<Vec<_>>();
-        let mut references = crate::presentation_summaries::references(
-            trace,
+        let mut references = super::references::collect(
+            context,
             &positions,
-            &identity_positions,
-            MAX_REFERENCES_PER_GROUP,
+            limits.max_references_per_group,
             global_reference_limit.saturating_sub(retained_references),
         );
         retained_references = retained_references.saturating_add(references.values.len());
@@ -189,14 +192,14 @@ fn materialize_groups(
             );
         }
         let summary_remaining = summary_limit.saturating_sub(retained_summary_bytes);
-        let summary = crate::presentation_summaries::summarize(
-            trace,
+        let summary = super::summary::summarize(
+            context,
             kind,
             &positions,
             /*child_count*/ 0,
             references.values.len(),
-            summary_remaining.min(MAX_SUMMARY_BYTES),
-            MAX_PREVIEW_CHARS,
+            summary_remaining.min(limits.max_summary_bytes_per_group),
+            limits.max_preview_chars,
         );
         retained_summary_bytes = retained_summary_bytes
             .saturating_add(summary.label_bytes)
@@ -209,12 +212,8 @@ fn materialize_groups(
                 "group summary reached its bounded text budget",
             );
         }
-        let completeness = crate::presentation_summaries::completeness(
-            trace,
-            kind,
-            &positions,
-            references.missing,
-        );
+        let completeness =
+            super::summary::completeness(context, kind, &positions, references.missing);
         groups.push(PresentationGroup {
             id,
             kind,
@@ -226,102 +225,8 @@ fn materialize_groups(
             metadata: summary.metadata,
             completeness,
             origin: GroupOrigin::Persisted,
-            default_visibility: presentation_policy::default_visibility(kind),
+            default_visibility: policy::default_visibility(kind),
         });
     }
     groups
-}
-
-fn identity_positions(trace: &SessionTrace) -> HashMap<TraceObjectRef, Vec<usize>> {
-    let mut positions = HashMap::<TraceObjectRef, Vec<usize>>::new();
-    for position in 0..trace.nodes.len() {
-        let facts = facts_at(trace, position);
-        for identity in facts
-            .correlations
-            .iter()
-            .filter(|correlation| correlation.relation == TraceRelation::SourceIdentity)
-            .map(|correlation| correlation.target.clone())
-        {
-            positions.entry(identity).or_default().push(position);
-        }
-    }
-    positions
-}
-
-fn facts_at(trace: &SessionTrace, position: usize) -> TraceNodeFacts {
-    trace
-        .nodes
-        .get(position)
-        .and_then(|node| trace.facts.get(&node.locator))
-        .cloned()
-        .unwrap_or_default()
-}
-
-fn scope(facts: &TraceNodeFacts) -> PresentationScope {
-    facts
-        .ownership
-        .thread_id
-        .as_ref()
-        .map_or(PresentationScope::Session, |thread_id| {
-            PresentationScope::Thread(thread_id.clone())
-        })
-}
-
-pub(crate) struct DiagnosticSink {
-    limit: usize,
-    diagnostics: Vec<PresentationDiagnostic>,
-    saturated: bool,
-}
-
-impl DiagnosticSink {
-    fn new(node_count: usize) -> Self {
-        Self {
-            limit: node_count.saturating_add(1).min(1_024),
-            diagnostics: Vec::new(),
-            saturated: false,
-        }
-    }
-
-    pub(crate) fn push(
-        &mut self,
-        code: PresentationDiagnosticCode,
-        group_id: Option<GroupId>,
-        node_position: Option<usize>,
-        message: &str,
-    ) {
-        if self.diagnostics.len() < self.limit {
-            self.diagnostics.push(PresentationDiagnostic {
-                code,
-                group_id,
-                node_position,
-                message: message.chars().take(MAX_SUMMARY_BYTES).collect(),
-            });
-        } else {
-            self.saturated = true;
-        }
-    }
-
-    fn extend(&mut self, diagnostics: impl IntoIterator<Item = PresentationDiagnostic>) {
-        for diagnostic in diagnostics {
-            self.push(
-                diagnostic.code,
-                diagnostic.group_id,
-                diagnostic.node_position,
-                &diagnostic.message,
-            );
-        }
-    }
-
-    fn finish(mut self) -> Vec<PresentationDiagnostic> {
-        if self.saturated && !self.diagnostics.is_empty() {
-            let last = self.diagnostics.len() - 1;
-            self.diagnostics[last] = PresentationDiagnostic {
-                code: PresentationDiagnosticCode::ResourceLimit,
-                group_id: None,
-                node_position: None,
-                message: "additional presentation diagnostics were bounded away".to_string(),
-            };
-        }
-        self.diagnostics
-    }
 }

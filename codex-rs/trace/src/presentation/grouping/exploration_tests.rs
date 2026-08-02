@@ -3,6 +3,7 @@ use pretty_assertions::assert_eq;
 use super::*;
 use crate::GroupEvidenceCounts;
 use crate::OrderBandId;
+use crate::TraceObjectRef;
 use crate::TraceStatus;
 
 #[test]

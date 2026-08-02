@@ -12,11 +12,12 @@ The accepted presentation program is materialized as separate open plans so each
 2. [Phase 1: Trace Order And Correlation](plans/closed/2026-07-30-trace-order-and-correlation.md) retains typed source-order and correlation facts.
 3. [Phase 2: Static Trace Presentation Index](plans/closed/2026-07-30-static-trace-presentation-index.md) materializes the minimal renderer-neutral partition.
 4. [Phase 3: Trace Grouping Policies](plans/closed/2026-07-30-trace-grouping-policies.md) implements deterministic lifecycle, agent, compaction, and higher-order grouping.
-5. [Phase 4: Trace Browser Lenses And Structured Navigation](plans/open/2026-07-30-trace-browser-lenses-and-structured-navigation.md) exposes grouped, expanded, structural, thread, member, and JSON navigation.
-6. [Phase 5: Borderless Horizontal Trace Surface](plans/open/2026-07-30-borderless-horizontal-trace-surface.md) applies the full-body visual surface and horizontal viewport.
-7. [Phase 6: Codex Transcript Parity](plans/open/2026-07-30-codex-transcript-parity.md) compares Ariadne groups with the current parent transcript.
-8. [Phase 7: Live Parent Trace Integration](plans/open/2026-07-30-live-parent-trace-integration.md) adds an opt-in `/trace` and transcript-shortcut integration.
-9. [Phase 8: Parent-Compatible Transcript Candidate](plans/open/2026-07-30-parent-compatible-transcript-candidate.md) prepares a locally maintainable replacement candidate.
+5. [Phase 3.5: Trace Module Factorization](plans/closed/2026-08-02-trace-module-factorization.md) partitions Ariadne-owned trace internals and exposes typed presentation bounds without changing semantics.
+6. [Phase 4: Trace Browser Lenses And Structured Navigation](plans/open/2026-07-30-trace-browser-lenses-and-structured-navigation.md) exposes grouped, expanded, structural, thread, member, and JSON navigation.
+7. [Phase 5: Borderless Horizontal Trace Surface](plans/open/2026-07-30-borderless-horizontal-trace-surface.md) applies the full-body visual surface and horizontal viewport.
+8. [Phase 6: Codex Transcript Parity](plans/open/2026-07-30-codex-transcript-parity.md) compares Ariadne groups with the current parent transcript.
+9. [Phase 7: Live Parent Trace Integration](plans/open/2026-07-30-live-parent-trace-integration.md) adds an opt-in `/trace` and transcript-shortcut integration.
+10. [Phase 8: Parent-Compatible Transcript Candidate](plans/open/2026-07-30-parent-compatible-transcript-candidate.md) prepares a locally maintainable replacement candidate.
 
 The open plan for each remaining phase is the execution authority for that phase; this roadmap is not. Closed phases retain their accepted decisions and validation records.
 

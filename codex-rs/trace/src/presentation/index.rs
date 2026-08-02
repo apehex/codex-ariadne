@@ -37,7 +37,12 @@ pub struct PresentationIndex {
 impl PresentationIndex {
     /// Builds one bounded deterministic snapshot from canonical typed facts.
     pub fn new(trace: &SessionTrace) -> Self {
-        crate::presentation_build::build(trace)
+        super::build::build(trace, super::PresentationLimits::default())
+    }
+
+    /// Builds one bounded deterministic snapshot with caller-selected limits.
+    pub fn new_with_limits(trace: &SessionTrace, limits: super::PresentationLimits) -> Self {
+        super::build::build(trace, limits)
     }
 
     /// Returns whether every required primary membership was admitted.
@@ -145,9 +150,9 @@ pub(crate) struct PresentationIndexParts {
 }
 
 #[cfg(test)]
-#[path = "presentation_index_tests.rs"]
+#[path = "index_tests.rs"]
 mod tests;
 
 #[cfg(test)]
-#[path = "presentation_grouping_tests.rs"]
+#[path = "grouping/correlation_tests.rs"]
 mod grouping_tests;

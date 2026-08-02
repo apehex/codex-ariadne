@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use pretty_assertions::assert_eq;
 
 use super::OrdinaryTopology;
-use super::read_bounded_line;
+use super::reader::read_bounded_line;
 use crate::catalog::OrdinaryThread;
 
 #[test]

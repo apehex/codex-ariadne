@@ -34,13 +34,17 @@ Graph finalization retains those positions as `TraceNodeFacts` instead of discar
 
 `TraceNodeFacts` also retains source ownership, an explicit complete/partial/unavailable/conflicting state, and typed correlations. Correlations cover source identities, parent and spawn edges, turn inputs, conversation producers, model-visible call IDs, runtime tool/MCP/code-mode IDs, inference inputs and outputs, code-cell membership, compaction membership, terminal ownership and model observations, interaction endpoints and carried items, and raw payload references. Ordinary sources expose only durable fields present in rollout records and remain partial rather than guessing rich runtime relationships.
 
+The private `facts` tree owns this normalization boundary. Focused modules define source order and ownership, activity policy facts, object correlations, aggregate node facts, and immutable indexed queries. Its facade explicitly re-exports the stable crate API. Deterministic index ordering shares the order module's same-domain comparison, while causal `TraceNodeFacts::source_cmp` continues to reject incompatible clocks and ordinary positions from different threads.
+
 ## Projection and reconciliation
 
 Ordinary projection uses `codex-rollout` and protocol records. It provides durable transcript and lifecycle semantics but does not claim exact generation context or decrypted collaboration content when those values were not persisted.
 
 Rich projection uses the `codex-rollout-trace` manifest, ordered event spine, reducer, runtime objects, interaction edges, and payload references. Reducer output remains governed by that crate; `codex-trace` adapts it rather than copying the rich schema.
 
-Rich node construction is routed through one projector and declarative node specifications. The projector owns parent validation, typed positions, presentation derivation, and graph admission; semantic branches own only extraction of their source values. Catalog discovery likewise accumulates ordinary and rich observations through one deterministic accumulator before producing public summaries.
+Rich node construction is routed through one projector and declarative node specifications. The projector owns presentation derivation and graph admission; the private `rich` adapter tree owns fact projection, shared fact constructors, terminal facts, and parent topology as separate responsibilities. The matching `ordinary` adapter tree separates JSONL reading, topology validation, and fact projection. Neither adapter implements a forced common projector abstraction; their shared boundary is the normalized node and typed-fact vocabulary.
+
+Catalog discovery likewise accumulates ordinary and rich observations through one deterministic accumulator before producing public summaries. Bounded filesystem traversal is isolated from observation reconciliation and selected-session loading.
 
 Reconciliation is additive:
 
@@ -91,7 +95,9 @@ Canonical order is a partial order. Ordinary ordinals and rich raw-event sequenc
 
 Every primary presentable event belongs to exactly one primary group. Sessions, threads, turns, and inference containers are structural-only; raw artifacts are reference-only; every retained node stays reachable through `TraceIndex`. Missing correlation yields a singleton or partial group rather than a proximity inference.
 
-The default structural limits are derived from the retained node count `N`: at most `2N` groups, `3N` direct membership entries, `4N` secondary references with at most 4,096 per group, nesting depth 4, 4 KiB per free-form summary, and 16 MiB total summary text. Presentation diagnostics, previews, and structured-value navigation use the additional exact caps in the accepted decision.
+The hard structural limits are derived from the retained node count `N`: at most `2N` groups and `3N` direct membership entries. `PresentationLimits` exposes caller-selected bounds for secondary references, group and snapshot summary text, previews, diagnostics, diagnostic messages, and group depth. Its defaults retain the prior `4N` reference budget with at most 4,096 per group, depth 4, 4 KiB per group summary, 16 MiB total summary text, 256 preview characters, 1,024 diagnostics, and 4 KiB diagnostic messages. Values above those safety maxima clamp to the defaults; zero disables the corresponding retained data except that one diagnostic slot remains available to explain degradation. Existing constructors delegate exactly to the defaults.
+
+Presentation implementation is private behind the stable crate-root exports. One build context owns effective limits, unavailable-fact fallback, thread scopes, and source-identity positions. Classification, interpreted content, bounded text, ordering, lifecycle correlation, owner indexes, hierarchy attachment, exploration batching, references, summaries, validation, and queries live in focused modules. This keeps renderer and source adapters from reconstructing presentation facts or bounds independently.
 
 Static construction belongs in selected-session loading and is bounded by retained nodes, memberships, references, summaries, and diagnostics. Indexed lookup by group, canonical node, scope, or band does not scan the complete trace, parse arbitrary node detail, or open raw payloads. The exploration reducer accepts ordered facts in arbitrary chunks and produces the same completed containers; origin-aware live canonical admission and public incremental snapshots remain Phase 7 work.
 

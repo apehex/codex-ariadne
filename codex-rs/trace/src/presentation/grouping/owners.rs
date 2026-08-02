@@ -3,20 +3,49 @@
 use std::collections::HashMap;
 
 use crate::GroupKind;
-use crate::SessionTrace;
 use crate::TraceActivity;
 use crate::TraceNodeFacts;
 use crate::TraceNodeKind;
 use crate::TraceObjectRef;
 use crate::TraceRelation;
+use crate::presentation::BuildContext;
+
+/// Reusable reverse-owner maps computed once for one grouping pass.
+pub(crate) struct CorrelationIndex {
+    pub(crate) tool_kinds: HashMap<String, GroupKind>,
+    pub(crate) code_items: HashMap<TraceObjectRef, String>,
+    pub(crate) compaction_items: HashMap<TraceObjectRef, String>,
+    pub(crate) operation_tools: HashMap<String, String>,
+}
+
+impl CorrelationIndex {
+    pub(crate) fn new(context: &BuildContext<'_>, primary: &[usize]) -> Self {
+        Self {
+            tool_kinds: tool_kinds(context, primary),
+            code_items: linked_items(
+                context,
+                primary,
+                TraceNodeKind::CodeCell,
+                &[TraceRelation::CodeSource, TraceRelation::CodeOutput],
+            ),
+            compaction_items: linked_items(
+                context,
+                primary,
+                TraceNodeKind::Compaction,
+                &[TraceRelation::CompactionMarker],
+            ),
+            operation_tools: operation_tools(context, primary),
+        }
+    }
+}
 
 /// Indexes retained runtime tool identities by presentation family.
-pub(crate) fn tool_kinds(trace: &SessionTrace, primary: &[usize]) -> HashMap<String, GroupKind> {
+fn tool_kinds(context: &BuildContext<'_>, primary: &[usize]) -> HashMap<String, GroupKind> {
     primary
         .iter()
         .filter_map(|position| {
-            let facts = facts_at(trace, *position);
-            let TraceObjectRef::ToolCall(tool_id) = source_identity(&facts)? else {
+            let facts = context.facts_at(*position);
+            let TraceObjectRef::ToolCall(tool_id) = source_identity(facts)? else {
                 return None;
             };
             let kind = match facts.policy.activity {
@@ -33,42 +62,16 @@ pub(crate) fn tool_kinds(trace: &SessionTrace, primary: &[usize]) -> HashMap<Str
         .collect()
 }
 
-/// Maps code source and output items back to their owning code cell.
-pub(crate) fn code_items(
-    trace: &SessionTrace,
-    primary: &[usize],
-) -> HashMap<TraceObjectRef, String> {
-    linked_items(
-        trace,
-        primary,
-        TraceNodeKind::CodeCell,
-        &[TraceRelation::CodeSource, TraceRelation::CodeOutput],
-    )
-}
-
-/// Maps compaction markers back to their installed checkpoint.
-pub(crate) fn compaction_items(
-    trace: &SessionTrace,
-    primary: &[usize],
-) -> HashMap<TraceObjectRef, String> {
-    linked_items(
-        trace,
-        primary,
-        TraceNodeKind::Compaction,
-        &[TraceRelation::CompactionMarker],
-    )
-}
-
 /// Maps terminal operations to their owning runtime tool.
-pub(crate) fn operation_tools(trace: &SessionTrace, primary: &[usize]) -> HashMap<String, String> {
+fn operation_tools(context: &BuildContext<'_>, primary: &[usize]) -> HashMap<String, String> {
     primary
         .iter()
         .filter_map(|position| {
-            let facts = facts_at(trace, *position);
-            let TraceObjectRef::TerminalOperation(operation) = source_identity(&facts)? else {
+            let facts = context.facts_at(*position);
+            let TraceObjectRef::TerminalOperation(operation) = source_identity(facts)? else {
                 return None;
             };
-            Some((operation, exact_tool_id(&facts)?))
+            Some((operation, exact_tool_id(facts)?))
         })
         .collect()
 }
@@ -120,19 +123,19 @@ pub(crate) fn compaction_id(facts: &TraceNodeFacts) -> Option<String> {
 
 /// Builds a conflict-rejecting reverse map for selected owner relations.
 fn linked_items(
-    trace: &SessionTrace,
+    context: &BuildContext<'_>,
     primary: &[usize],
     owner_kind: TraceNodeKind,
     relations: &[TraceRelation],
 ) -> HashMap<TraceObjectRef, String> {
     let mut values = HashMap::<TraceObjectRef, Option<String>>::new();
     for position in primary {
-        let node = &trace.nodes[*position];
+        let node = &context.trace().nodes[*position];
         if node.locator.kind != owner_kind {
             continue;
         }
-        let facts = facts_at(trace, *position);
-        let Some(owner) = source_identity(&facts).and_then(object_id) else {
+        let facts = context.facts_at(*position);
+        let Some(owner) = source_identity(facts).and_then(object_id) else {
             continue;
         };
         for target in facts
@@ -184,14 +187,4 @@ fn source_identity(facts: &TraceNodeFacts) -> Option<TraceObjectRef> {
     facts.correlations.iter().find_map(|correlation| {
         (correlation.relation == TraceRelation::SourceIdentity).then(|| correlation.target.clone())
     })
-}
-
-/// Returns typed facts for a canonical position with explicit unavailable fallback.
-fn facts_at(trace: &SessionTrace, position: usize) -> TraceNodeFacts {
-    trace
-        .nodes
-        .get(position)
-        .and_then(|node| trace.facts.get(&node.locator))
-        .cloned()
-        .unwrap_or_default()
 }

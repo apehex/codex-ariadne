@@ -43,7 +43,7 @@ pub(crate) fn record(
         TraceFactAvailability::Partial,
         correlations(item),
     );
-    match crate::presentation_facts::ordinary(item) {
+    match crate::presentation::activity::ordinary(item) {
         Some(activity) => facts.with_activity(activity),
         None => facts,
     }
@@ -140,5 +140,5 @@ fn link(relation: TraceRelation, target: TraceObjectRef) -> TraceCorrelation {
 }
 
 #[cfg(test)]
-#[path = "ordinary_facts_tests.rs"]
+#[path = "facts_tests.rs"]
 mod tests;

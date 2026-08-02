@@ -1,13 +1,6 @@
 //! Bounded materialization of ordinary Codex rollout files.
 
-use std::collections::BTreeMap;
-use std::collections::BTreeSet;
-use std::fs::File;
-use std::io::BufRead;
-use std::io::BufReader;
-use std::io::Read;
 use std::path::Path;
-use std::path::PathBuf;
 
 use chrono::DateTime;
 use codex_protocol::protocol::RolloutItem;
@@ -29,73 +22,12 @@ use crate::TraceOwnership;
 use crate::TraceRelation;
 use crate::TraceSourceKind;
 use crate::catalog::OrdinaryThread;
-use crate::ordinary_facts;
+mod facts;
+mod reader;
+mod topology;
 
-/// Precomputed ordinary-thread identity and containment relationships.
-pub(crate) struct OrdinaryTopology<'a> {
-    by_id: BTreeMap<&'a str, Vec<&'a OrdinaryThread>>,
-}
-
-impl<'a> OrdinaryTopology<'a> {
-    /// Indexes every retained observation without silently choosing a conflicting parent.
-    pub(crate) fn new(threads: &'a [OrdinaryThread]) -> Self {
-        let mut by_id = BTreeMap::<&str, Vec<&OrdinaryThread>>::new();
-        for thread in threads {
-            by_id
-                .entry(thread.thread_id.as_str())
-                .or_default()
-                .push(thread);
-        }
-        Self { by_id }
-    }
-
-    /// Resolves a same-session parent while rejecting gaps, conflicts, and cycles.
-    fn parent_id(&self, thread: &'a OrdinaryThread) -> Result<Option<&'a str>, String> {
-        let Some(parent_id) = thread.parent_thread_id.as_deref() else {
-            return Ok(None);
-        };
-        let mut next = Some(parent_id);
-        let mut seen = BTreeSet::new();
-        while let Some(id) = next {
-            if !seen.insert(id) {
-                return Err(format!(
-                    "parent cycle at {id}; attached thread {} to session {}",
-                    thread.thread_id, thread.session_id
-                ));
-            }
-            let Some(observations) = self.by_id.get(id) else {
-                return Err(format!(
-                    "parent rollout {id} is missing or belongs to another session; attached thread {} to session {}",
-                    thread.thread_id, thread.session_id
-                ));
-            };
-            let same_session = observations
-                .iter()
-                .copied()
-                .filter(|parent| parent.session_id == thread.session_id)
-                .collect::<Vec<_>>();
-            if same_session.is_empty() {
-                let observed_session = &observations[0].session_id;
-                return Err(format!(
-                    "parent rollout {id} belongs to session {observed_session}; attached thread {} to session {}",
-                    thread.thread_id, thread.session_id
-                ));
-            }
-            let parent_parent = same_session[0].parent_thread_id.as_deref();
-            if same_session
-                .iter()
-                .any(|parent| parent.parent_thread_id.as_deref() != parent_parent)
-            {
-                return Err(format!(
-                    "parent rollout {id} has conflicting containment observations; attached thread {} to session {}",
-                    thread.thread_id, thread.session_id
-                ));
-            }
-            next = parent_parent;
-        }
-        Ok(Some(parent_id))
-    }
-}
+use self::reader::BoundedRolloutReader;
+pub(crate) use self::topology::OrdinaryTopology;
 
 /// Projects one ordinary thread and its bounded JSONL records.
 pub(crate) async fn load_thread(
@@ -233,7 +165,7 @@ pub(crate) async fn load_thread(
                 if let RolloutItem::TurnContext(context) = &line.item {
                     current_turn_id.clone_from(&context.turn_id);
                 }
-                let facts = ordinary_facts::record(
+                let facts = facts::record(
                     &line.item,
                     &thread.thread_id,
                     ordinal(&value, line_index),
@@ -340,93 +272,6 @@ fn thread_locator(session_id: &str, thread_id: &str) -> TraceNodeLocator {
 /// Builds a source-local non-fatal diagnostic.
 fn path_diagnostic(path: &Path, message: String) -> TraceDiagnostic {
     TraceDiagnostic::unavailable_at(path, message)
-}
-
-/// One bounded rollout line, excluding its line terminator.
-struct BoundedLine {
-    bytes: Vec<u8>,
-    oversized: bool,
-}
-
-/// Blocking plain-or-zstd reader driven from Tokio's blocking pool.
-struct BoundedRolloutReader {
-    reader: Option<BufReader<Box<dyn Read + Send>>>,
-}
-
-impl BoundedRolloutReader {
-    /// Opens an ordinary rollout without changing its on-disk representation.
-    async fn open(path: &Path) -> std::io::Result<Self> {
-        let path = path.to_path_buf();
-        let reader = tokio::task::spawn_blocking(move || open_blocking(path))
-            .await
-            .map_err(std::io::Error::other)??;
-        Ok(Self {
-            reader: Some(reader),
-        })
-    }
-
-    /// Reads one record while discarding bytes beyond the configured cap.
-    async fn next_line(&mut self, limit: usize) -> std::io::Result<Option<BoundedLine>> {
-        let Some(mut reader) = self.reader.take() else {
-            return Err(std::io::Error::other("rollout reader is busy"));
-        };
-        let (result, reader) =
-            tokio::task::spawn_blocking(move || (read_bounded_line(&mut reader, limit), reader))
-                .await
-                .map_err(std::io::Error::other)?;
-        self.reader = Some(reader);
-        result
-    }
-}
-
-/// Opens a plain or compressed rollout for blocking buffered reads.
-fn open_blocking(path: PathBuf) -> std::io::Result<BufReader<Box<dyn Read + Send>>> {
-    let file = File::open(&path)?;
-    let reader: Box<dyn Read + Send> =
-        if path.extension().is_some_and(|extension| extension == "zst") {
-            Box::new(zstd::stream::read::Decoder::new(file)?)
-        } else {
-            Box::new(file)
-        };
-    Ok(BufReader::new(reader))
-}
-
-/// Reads through one newline without retaining bytes beyond `limit`.
-fn read_bounded_line(
-    reader: &mut impl BufRead,
-    limit: usize,
-) -> std::io::Result<Option<BoundedLine>> {
-    let mut bytes = Vec::with_capacity(limit.saturating_add(1).min(64 * 1024));
-    let mut oversized = false;
-    let mut saw_bytes = false;
-    loop {
-        let available = reader.fill_buf()?;
-        if available.is_empty() {
-            break;
-        }
-        saw_bytes = true;
-        let consumed = available
-            .iter()
-            .position(|byte| *byte == b'\n')
-            .map_or(available.len(), |index| index + 1);
-        let chunk = &available[..consumed];
-        let without_newline = chunk.strip_suffix(b"\n").unwrap_or(chunk);
-        let remaining = limit.saturating_sub(bytes.len());
-        bytes.extend_from_slice(&without_newline[..without_newline.len().min(remaining)]);
-        oversized |= without_newline.len() > remaining;
-        let ends_with_newline = chunk.ends_with(b"\n");
-        reader.consume(consumed);
-        if ends_with_newline {
-            break;
-        }
-    }
-    if !saw_bytes {
-        return Ok(None);
-    }
-    if bytes.last() == Some(&b'\r') {
-        bytes.pop();
-    }
-    Ok(Some(BoundedLine { bytes, oversized }))
 }
 
 #[cfg(test)]

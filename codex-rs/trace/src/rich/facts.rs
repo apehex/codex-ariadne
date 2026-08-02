@@ -15,6 +15,9 @@ use codex_rollout_trace::ToolCall;
 use codex_rollout_trace::ToolCallRequester;
 use codex_rollout_trace::TraceAnchor;
 
+use super::fact_support::execution_order;
+use super::fact_support::identity;
+use super::fact_support::link;
 use crate::TraceCorrelation;
 use crate::TraceFactAvailability;
 use crate::TraceNodeFacts;
@@ -213,7 +216,7 @@ pub(crate) fn tool(
         availability,
         correlations,
     )
-    .with_activity(crate::presentation_facts::rich_tool(tool))
+    .with_activity(crate::presentation::activity::rich_tool(tool))
 }
 
 pub(crate) fn code_cell(
@@ -361,7 +364,7 @@ pub(crate) fn interaction(
         availability,
         correlations,
     )
-    .with_activity(crate::presentation_facts::interaction(&edge.kind))
+    .with_activity(crate::presentation::activity::interaction(&edge.kind))
 }
 
 pub(crate) fn raw_payload(id: &str) -> TraceNodeFacts {
@@ -389,15 +392,6 @@ fn execution_facts(
     )
 }
 
-fn execution_order(execution: &ExecutionWindow) -> TraceOrder {
-    TraceOrder::rich(
-        execution.started_seq,
-        execution.ended_seq,
-        execution.started_at_unix_ms,
-        execution.ended_at_unix_ms,
-    )
-}
-
 fn facts(
     order: TraceOrder,
     thread_id: Option<&str>,
@@ -416,19 +410,11 @@ fn facts(
     )
 }
 
-fn identity(target: TraceObjectRef) -> Vec<TraceCorrelation> {
-    vec![link(TraceRelation::SourceIdentity, target)]
-}
-
 fn raw_payload_link(id: impl AsRef<str>) -> TraceCorrelation {
     link(
         TraceRelation::RawPayload,
         TraceObjectRef::RawPayload(id.as_ref().to_string()),
     )
-}
-
-fn link(relation: TraceRelation, target: TraceObjectRef) -> TraceCorrelation {
-    TraceCorrelation::new(relation, target)
 }
 
 fn producer_ref(producer: &ProducerRef) -> TraceObjectRef {
@@ -460,5 +446,5 @@ fn anchor_ref(anchor: &TraceAnchor) -> TraceObjectRef {
 }
 
 #[cfg(test)]
-#[path = "rich_facts_tests.rs"]
+#[path = "facts_tests.rs"]
 mod tests;

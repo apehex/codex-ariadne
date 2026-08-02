@@ -1,15 +1,13 @@
 //! Immutable lookup snapshots over retained trace facts.
 
-use std::cmp::Ordering;
 use std::collections::HashMap;
 
+use super::TraceCorrelation;
+use super::TraceNodeFacts;
+use super::TraceOrder;
+use super::TraceOrderDomain;
 use crate::SessionTrace;
-use crate::TraceCorrelation;
-use crate::TraceNodeFacts;
 use crate::TraceNodeLocator;
-use crate::TraceOrder;
-use crate::TraceOrderDomain;
-use crate::TraceOrderPoint;
 
 /// Immutable lookup snapshot for typed node facts.
 ///
@@ -66,9 +64,8 @@ impl TraceFactIndex {
         }
         for domains in thread_positions.values_mut() {
             for positions in domains.values_mut() {
-                positions.sort_by(|left, right| {
-                    stable_order_cmp(&facts[*left].order, &facts[*right].order)
-                });
+                positions
+                    .sort_by(|left, right| facts[*left].order.stable_cmp(&facts[*right].order));
             }
         }
 
@@ -135,48 +132,6 @@ impl TraceFactIndex {
     }
 }
 
-fn stable_order_cmp(left: &TraceOrder, right: &TraceOrder) -> Ordering {
-    match (left.start, right.start) {
-        (
-            TraceOrderPoint::Ordinary { ordinal: left },
-            TraceOrderPoint::Ordinary { ordinal: right },
-        ) => left.cmp(&right),
-        (TraceOrderPoint::Rich { sequence: left }, TraceOrderPoint::Rich { sequence: right }) => {
-            left.cmp(&right)
-        }
-        (
-            TraceOrderPoint::Structural { unix_ms: left },
-            TraceOrderPoint::Structural { unix_ms: right },
-        ) => left.cmp(&right),
-        (TraceOrderPoint::Unspecified, TraceOrderPoint::Unspecified)
-        | (
-            TraceOrderPoint::Ordinary { .. },
-            TraceOrderPoint::Rich { .. }
-            | TraceOrderPoint::Structural { .. }
-            | TraceOrderPoint::Unspecified,
-        )
-        | (
-            TraceOrderPoint::Rich { .. },
-            TraceOrderPoint::Ordinary { .. }
-            | TraceOrderPoint::Structural { .. }
-            | TraceOrderPoint::Unspecified,
-        )
-        | (
-            TraceOrderPoint::Structural { .. },
-            TraceOrderPoint::Ordinary { .. }
-            | TraceOrderPoint::Rich { .. }
-            | TraceOrderPoint::Unspecified,
-        )
-        | (
-            TraceOrderPoint::Unspecified,
-            TraceOrderPoint::Ordinary { .. }
-            | TraceOrderPoint::Rich { .. }
-            | TraceOrderPoint::Structural { .. },
-        ) => Ordering::Equal,
-    }
-    .then(left.tie_break.cmp(&right.tie_break))
-}
-
 #[cfg(test)]
-#[path = "fact_index_tests.rs"]
+#[path = "index_tests.rs"]
 mod tests;

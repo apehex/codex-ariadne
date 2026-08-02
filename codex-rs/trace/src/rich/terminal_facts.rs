@@ -3,11 +3,12 @@
 use codex_rollout_trace::TerminalOperation;
 use codex_rollout_trace::TerminalSession;
 
-use crate::TraceCorrelation;
+use super::fact_support::execution_order;
+use super::fact_support::identity;
+use super::fact_support::link;
 use crate::TraceFactAvailability;
 use crate::TraceNodeFacts;
 use crate::TraceObjectRef;
-use crate::TraceOrder;
 use crate::TraceOwnership;
 use crate::TraceRelation;
 
@@ -54,7 +55,7 @@ pub(crate) fn operation(
         availability,
         correlations,
     )
-    .with_activity(crate::presentation_facts::terminal(operation))
+    .with_activity(crate::presentation::activity::terminal(operation))
 }
 
 pub(crate) fn session(
@@ -84,23 +85,6 @@ pub(crate) fn session(
     )
 }
 
-fn execution_order(execution: &codex_rollout_trace::ExecutionWindow) -> TraceOrder {
-    TraceOrder::rich(
-        execution.started_seq,
-        execution.ended_seq,
-        execution.started_at_unix_ms,
-        execution.ended_at_unix_ms,
-    )
-}
-
-fn identity(target: TraceObjectRef) -> Vec<TraceCorrelation> {
-    vec![link(TraceRelation::SourceIdentity, target)]
-}
-
-fn link(relation: TraceRelation, target: TraceObjectRef) -> TraceCorrelation {
-    TraceCorrelation::new(relation, target)
-}
-
 #[cfg(test)]
-#[path = "rich_terminal_facts_tests.rs"]
+#[path = "terminal_facts_tests.rs"]
 mod tests;

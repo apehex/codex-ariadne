@@ -5,11 +5,11 @@ use pretty_assertions::assert_eq;
 use super::MAX_CORRELATIONS_PER_NODE;
 use super::TraceFactAvailability;
 use super::TraceNodeFacts;
-use super::TraceObjectRef;
 use super::TraceOrder;
 use super::TraceOwnership;
-use super::TraceRelation;
 use crate::TraceCorrelation;
+use crate::TraceObjectRef;
+use crate::TraceRelation;
 
 #[test]
 fn source_comparison_respects_order_domains_and_thread_ownership() {

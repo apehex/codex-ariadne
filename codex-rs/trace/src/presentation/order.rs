@@ -3,6 +3,7 @@
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 
+use super::BuildContext;
 use crate::GroupId;
 use crate::OrderBandId;
 use crate::OrderBandKind;
@@ -12,8 +13,6 @@ use crate::PresentationDiagnosticCode;
 use crate::PresentationEvent;
 use crate::PresentationOrderBand;
 use crate::PresentationScope;
-use crate::SessionTrace;
-use crate::TraceNodeFacts;
 use crate::TraceObjectRef;
 use crate::TraceOrderDomain;
 use crate::TraceRelation;
@@ -32,17 +31,18 @@ enum AlignmentKey {
 }
 
 pub(crate) fn build_order(
-    trace: &SessionTrace,
+    context: &BuildContext<'_>,
     primary_group_ids: &[Option<GroupId>],
 ) -> OrderOutput {
+    let trace = context.trace();
     let mut scoped = BTreeMap::<PresentationScope, BTreeMap<TraceOrderDomain, Vec<usize>>>::new();
     for (position, group_id) in primary_group_ids.iter().enumerate() {
         if group_id.is_none() {
             continue;
         }
-        let facts = facts_at(trace, position);
+        let facts = context.facts_at(position);
         scoped
-            .entry(scope(&facts))
+            .entry(context.scope_at(position))
             .or_default()
             .entry(facts.order.start.domain())
             .or_default()
@@ -51,10 +51,10 @@ pub(crate) fn build_order(
     for domains in scoped.values_mut() {
         for positions in domains.values_mut() {
             positions.sort_by(|left, right| {
-                let left_facts = facts_at(trace, *left);
-                let right_facts = facts_at(trace, *right);
+                let left_facts = context.facts_at(*left);
+                let right_facts = context.facts_at(*right);
                 left_facts
-                    .source_cmp(&right_facts)
+                    .source_cmp(right_facts)
                     .unwrap_or(std::cmp::Ordering::Equal)
                     .then(left_facts.order.tie_break.cmp(&right_facts.order.tie_break))
                     .then(left.cmp(right))
@@ -74,7 +74,7 @@ pub(crate) fn build_order(
             .unwrap_or_default();
         let rich = domains.remove(&TraceOrderDomain::Rich).unwrap_or_default();
         add_causal_bands(
-            trace,
+            context,
             primary_group_ids,
             &scope,
             &ordinary,
@@ -82,7 +82,7 @@ pub(crate) fn build_order(
             &mut output,
         );
         let mut unpositioned = domains.into_values().flatten().collect::<Vec<_>>();
-        unpositioned.sort_by_key(|position| facts_at(trace, *position).order.tie_break);
+        unpositioned.sort_by_key(|position| context.facts_at(*position).order.tie_break);
         if !unpositioned.is_empty() {
             add_band(
                 &scope,
@@ -100,7 +100,7 @@ pub(crate) fn build_order(
 }
 
 fn add_causal_bands(
-    trace: &SessionTrace,
+    context: &BuildContext<'_>,
     primary_group_ids: &[Option<GroupId>],
     scope: &PresentationScope,
     ordinary: &[usize],
@@ -128,8 +128,8 @@ fn add_causal_bands(
         return;
     }
 
-    let ordinary_keys = alignment_keys(trace, ordinary, primary_group_ids);
-    let rich_keys = alignment_keys(trace, rich, primary_group_ids);
+    let ordinary_keys = alignment_keys(context, ordinary, primary_group_ids);
+    let rich_keys = alignment_keys(context, rich, primary_group_ids);
     let rich_positions = rich_keys
         .iter()
         .enumerate()
@@ -289,7 +289,7 @@ fn add_band(
 }
 
 fn alignment_keys(
-    trace: &SessionTrace,
+    context: &BuildContext<'_>,
     positions: &[usize],
     primary_group_ids: &[Option<GroupId>],
 ) -> Vec<Option<AlignmentKey>> {
@@ -298,7 +298,7 @@ fn alignment_keys(
     positions
         .iter()
         .map(|position| {
-            let facts = facts_at(trace, *position);
+            let facts = context.facts_at(*position);
             if let Some(identity) = facts.correlations.iter().find_map(|correlation| {
                 (correlation.relation == TraceRelation::SourceIdentity)
                     .then(|| correlation.target.clone())
@@ -320,23 +320,4 @@ fn alignment_keys(
             }
         })
         .collect()
-}
-
-fn facts_at(trace: &SessionTrace, position: usize) -> TraceNodeFacts {
-    trace
-        .nodes
-        .get(position)
-        .and_then(|node| trace.facts.get(&node.locator))
-        .cloned()
-        .unwrap_or_default()
-}
-
-fn scope(facts: &TraceNodeFacts) -> PresentationScope {
-    facts
-        .ownership
-        .thread_id
-        .as_ref()
-        .map_or(PresentationScope::Session, |thread_id| {
-            PresentationScope::Thread(thread_id.clone())
-        })
 }

@@ -23,6 +23,11 @@ use crate::TraceNodeLocator;
 use crate::TraceSourceKind;
 use crate::TraceStatus;
 
+mod accumulator;
+mod discovery;
+
+use self::accumulator::CatalogAccumulator;
+
 /// Metadata for one discovered ordinary rollout observation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct OrdinaryThread {
@@ -97,9 +102,9 @@ impl TraceRepository {
     pub async fn discover(&self) -> TraceCatalog {
         let mut catalog = CatalogAccumulator::default();
         for (root, archived) in &self.ordinary_roots {
-            for path in discover_files(
+            for path in discovery::files(
                 root,
-                is_rollout_file,
+                discovery::is_rollout_file,
                 self.limits.max_discovered_files_per_root,
                 catalog.diagnostics_mut(),
             )
@@ -137,9 +142,9 @@ impl TraceRepository {
         let mut bundle_paths = self.rich_bundles.clone();
         for rich_root in &self.rich_roots {
             bundle_paths.extend(
-                discover_files(
+                discovery::files(
                     rich_root,
-                    is_bundle_manifest,
+                    discovery::is_bundle_manifest,
                     self.limits.max_discovered_files_per_root,
                     catalog.diagnostics_mut(),
                 )
@@ -163,127 +168,6 @@ impl TraceRepository {
         }
 
         catalog.finish(self.limits)
-    }
-}
-
-/// Accumulates source observations and their discovery diagnostics.
-#[derive(Default)]
-struct CatalogAccumulator {
-    entries: BTreeMap<String, CatalogEntry>,
-    ordinary_identities: BTreeMap<(String, String), OrdinaryThread>,
-    diagnostics: Vec<TraceDiagnostic>,
-}
-
-impl CatalogAccumulator {
-    /// Exposes the shared diagnostic sink to bounded filesystem discovery.
-    fn diagnostics_mut(&mut self) -> &mut Vec<TraceDiagnostic> {
-        &mut self.diagnostics
-    }
-
-    /// Retains one ordinary observation and reports incompatible repeated identity.
-    fn observe_ordinary(&mut self, thread: OrdinaryThread) {
-        let identity = (thread.session_id.clone(), thread.thread_id.clone());
-        if let Some(previous) = self.ordinary_identities.get(&identity)
-            && !same_ordinary_observation(previous, &thread)
-        {
-            self.diagnostics.push(TraceDiagnostic {
-                locator: None,
-                path: Some(thread.path.clone()),
-                evidence: EvidenceGrade::Conflicting,
-                message: format!(
-                    "conflicting ordinary rollout for thread {}; retained separately from {}",
-                    thread.thread_id,
-                    previous.path.display()
-                ),
-            });
-        }
-        self.ordinary_identities
-            .entry(identity)
-            .or_insert_with(|| thread.clone());
-        self.entries
-            .entry(thread.session_id.clone())
-            .or_default()
-            .ordinary
-            .push(thread);
-    }
-
-    /// Retains one rich bundle under its compatible ordinary catalog identity.
-    fn observe_rich(&mut self, path: PathBuf, manifest: codex_rollout_trace::TraceBundleMetadata) {
-        if manifest.schema_version != codex_rollout_trace::TRACE_BUNDLE_SCHEMA_VERSION {
-            self.diagnostics.push(TraceDiagnostic {
-                locator: None,
-                path: Some(path.clone()),
-                evidence: EvidenceGrade::Unavailable,
-                message: format!(
-                    "rich trace manifest schema {} differs from supported schema {}",
-                    manifest.schema_version,
-                    codex_rollout_trace::TRACE_BUNDLE_SCHEMA_VERSION
-                ),
-            });
-        }
-        let key = if self.entries.contains_key(&manifest.rollout_id) {
-            manifest.rollout_id.clone()
-        } else if self.entries.contains_key(&manifest.root_thread_id) {
-            manifest.root_thread_id.clone()
-        } else {
-            manifest.rollout_id.clone()
-        };
-        let entry = self.entries.entry(key).or_default();
-        if !entry.ordinary.is_empty()
-            && entry
-                .ordinary
-                .iter()
-                .all(|thread| thread.thread_id != manifest.root_thread_id)
-        {
-            self.diagnostics.push(TraceDiagnostic {
-                locator: None,
-                path: Some(path.clone()),
-                evidence: EvidenceGrade::Conflicting,
-                message: format!(
-                    "rich root {} conflicts with ordinary rollout root",
-                    manifest.root_thread_id
-                ),
-            });
-        }
-        let bundle = RichBundle {
-            path: path.clone(),
-            manifest,
-        };
-        if let Some(previous) = entry.rich.first()
-            && previous.manifest != bundle.manifest
-        {
-            self.diagnostics.push(TraceDiagnostic {
-                locator: None,
-                path: Some(path),
-                evidence: EvidenceGrade::Conflicting,
-                message: format!(
-                    "conflicting rich bundle retained separately from {}",
-                    previous.path.display()
-                ),
-            });
-        }
-        entry.rich.push(bundle);
-    }
-
-    /// Adds one discovery problem without discarding usable observations.
-    fn record_diagnostic(&mut self, diagnostic: TraceDiagnostic) {
-        self.diagnostics.push(diagnostic);
-    }
-
-    /// Produces the public catalog after deterministic summary ordering.
-    fn finish(self, limits: TraceLimits) -> TraceCatalog {
-        let mut sessions = self
-            .entries
-            .iter()
-            .map(|(session_id, entry)| summarize(session_id, entry))
-            .collect::<Vec<_>>();
-        sessions.sort_by(|left, right| right.created_at.cmp(&left.created_at));
-        TraceCatalog {
-            sessions,
-            diagnostics: self.diagnostics,
-            entries: self.entries,
-            limits,
-        }
     }
 }
 
@@ -479,95 +363,6 @@ fn rich_status(status: &codex_rollout_trace::RolloutStatus) -> TraceStatus {
     }
 }
 
-async fn discover_files(
-    root: &Path,
-    predicate: fn(&Path) -> bool,
-    max_files: usize,
-    diagnostics: &mut Vec<TraceDiagnostic>,
-) -> Vec<PathBuf> {
-    if !root.exists() {
-        return Vec::new();
-    }
-    let mut files = Vec::new();
-    let mut pending = vec![root.to_path_buf()];
-    let max_entries = max_files.saturating_mul(16).max(1_024);
-    let mut inspected_entries = 0_usize;
-    while let Some(directory) = pending.pop() {
-        let mut entries = match tokio::fs::read_dir(&directory).await {
-            Ok(entries) => entries,
-            Err(error) => {
-                diagnostics.push(path_diagnostic(
-                    &directory,
-                    format!("cannot read directory: {error}"),
-                ));
-                continue;
-            }
-        };
-        loop {
-            match entries.next_entry().await {
-                Ok(Some(entry)) => {
-                    inspected_entries += 1;
-                    if inspected_entries > max_entries {
-                        diagnostics.push(path_diagnostic(
-                            root,
-                            format!(
-                                "file discovery stopped after inspecting {max_entries} entries"
-                            ),
-                        ));
-                        files.sort();
-                        return files;
-                    }
-                    match entry.file_type().await {
-                        Ok(file_type) if file_type.is_dir() => pending.push(entry.path()),
-                        Ok(file_type) if file_type.is_file() && predicate(&entry.path()) => {
-                            files.push(entry.path());
-                            if files.len() >= max_files {
-                                diagnostics.push(path_diagnostic(
-                                    root,
-                                    format!("file discovery stopped at {max_files} matches"),
-                                ));
-                                files.sort();
-                                return files;
-                            }
-                        }
-                        Ok(_) => {}
-                        Err(error) => diagnostics.push(path_diagnostic(
-                            &entry.path(),
-                            format!("cannot inspect directory entry: {error}"),
-                        )),
-                    }
-                }
-                Ok(None) => break,
-                Err(error) => {
-                    diagnostics.push(path_diagnostic(
-                        &directory,
-                        format!("cannot enumerate directory: {error}"),
-                    ));
-                    break;
-                }
-            }
-        }
-    }
-    files.sort();
-    files
-}
-
-fn is_rollout_file(path: &Path) -> bool {
-    let name = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("");
-    name.starts_with("rollout-") && (name.ends_with(".jsonl") || name.ends_with(".jsonl.zst"))
-}
-
-fn is_bundle_manifest(path: &Path) -> bool {
-    path.file_name().is_some_and(|name| name == "manifest.json")
-}
-
-fn path_diagnostic(path: &Path, message: String) -> TraceDiagnostic {
-    TraceDiagnostic::unavailable_at(path, message)
-}
-
 fn diagnostic_belongs_to(diagnostic: &TraceDiagnostic, entry: &CatalogEntry) -> bool {
     let Some(path) = diagnostic.path.as_ref() else {
         return false;
@@ -590,17 +385,4 @@ fn diagnostic_provenance(diagnostic: &TraceDiagnostic, entry: &CatalogEntry) -> 
     } else {
         TraceSourceKind::Ordinary
     }
-}
-
-/// Compares ordinary trace metadata while ignoring the duplicate source path.
-fn same_ordinary_observation(left: &OrdinaryThread, right: &OrdinaryThread) -> bool {
-    left.session_id == right.session_id
-        && left.thread_id == right.thread_id
-        && left.parent_thread_id == right.parent_thread_id
-        && left.forked_from_thread_id == right.forked_from_thread_id
-        && left.history_base == right.history_base
-        && left.timestamp == right.timestamp
-        && left.cwd == right.cwd
-        && left.model_provider == right.model_provider
-        && left.archived == right.archived
 }
