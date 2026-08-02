@@ -2,11 +2,11 @@
 source: trace-tui/src/render_tests.rs
 expression: "render_app(&mut picker, 140, 30)"
 ---
- Codex Trace  read-only · offline │ session 019d0000-0000-7000-8000-000000000101
+ Codex Trace  read-only · offline │ thread 019d0000-0000-7000-8000-000000000101 / collapsed
 
 ┌ Records ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
 │  NAME                   KIND CLASS        STATUS    TIME                 SOURCE   EVIDENCE      PREVIEW                                  │
-│▶ thread 019d0000-0000-… THR  structure    —         2026-07-25T00:00:00Z ordinary semantic                                               │
+│▶ event                  user user         —         —                    persist… semantic      root needle                              │
 │                                                                                                                                          │
 │                                                                                                                                          │
 │                                                                                                                                          │
@@ -31,4 +31,4 @@ expression: "render_app(&mut picker, 140, 30)"
 │                                                                                                                                          │
 │                                                                                                                                          │
 └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
- 1/1 visible · 0 hidden · 0 columns omitted  jk move  Enter descend  i detail  Esc parent  / search  f filter  ? help  q quit
+ 1/2 visible · 1 hidden · 0 columns omitted · Collapsed  jk move  Enter descend  i detail  s json  Tab lens  Esc parent  / search  f filter

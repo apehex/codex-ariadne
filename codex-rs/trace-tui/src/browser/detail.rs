@@ -11,23 +11,12 @@ use ratatui::text::Line;
 use super::BrowserState;
 use super::DetailCache;
 use super::PayloadState;
-use crate::ContentMode;
 use crate::jobs::DetailRenderJob;
 use crate::jobs::DetailRenderKey;
 use crate::jobs::DetailRenderResult;
 use crate::request::BrowserEpoch;
 
 impl BrowserState {
-    /// Opens the selected leaf in full-screen semantic detail mode.
-    pub(crate) fn open_detail(&mut self) {
-        if self.selected_node().is_some() {
-            self.detail_open = true;
-            self.detail_scroll = 0;
-            self.content_mode = ContentMode::Rendered;
-            self.invalidate_detail();
-        }
-    }
-
     /// Selects the next semantic/raw representation for the current detail.
     pub(crate) fn cycle_content_mode(&mut self) {
         self.content_mode = self.content_mode.next();
@@ -117,8 +106,8 @@ impl BrowserState {
             return;
         }
         let is_current = self
-            .selected_node()
-            .is_some_and(|node| node.locator == result.key.locator)
+            .detail_locator()
+            .is_some_and(|locator| *locator == result.key.locator)
             && self.content_mode == result.key.mode
             && self.payload_generation == result.key.payload_generation;
         if !is_current {

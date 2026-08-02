@@ -2,7 +2,7 @@
 source: trace-tui/src/render_tests.rs
 expression: "render_app(&mut app, 150, 24)"
 ---
- Codex Trace  read-only · offline │ session 019d0000-0000-7000-8000-000000000101 / thread 019d0000-0000-7000-8000-000000000101
+ Codex Trace  read-only · offline │ session 019d0000-0000-7000-8000-000000000101 / thread 019d0000-0000-7000-8000-000000000101 / structural
 
 ┌ Records ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
 │  NAME                   KIND CLASS        STATUS    TIME                 SOURCE   EVIDENCE      PREVIEW                                            │
@@ -25,4 +25,4 @@ expression: "render_app(&mut app, 150, 24)"
 │                                                                                                                                                    │
 │                                                                                                                                                    │
 └────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
- 2/2 visible · 0 hidden · 0 columns omitted  jk move  Enter descend  i detail  Esc parent  / search  f filter  ? help  q quit
+ 2/2 visible · 0 hidden · 0 columns omitted · Structural  jk move  Enter descend  i detail  s json  Tab lens  Esc parent  / search  f filter  ? help

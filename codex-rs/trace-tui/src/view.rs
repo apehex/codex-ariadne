@@ -50,6 +50,48 @@ pub enum PreviewMode {
     Never,
 }
 
+/// Renderer-independent browser projection selected for one trace scope.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum TraceLens {
+    /// One row per top-level presentation group.
+    Collapsed,
+    /// One row per canonical primary event with group annotations.
+    Expanded,
+    /// Canonical containment through the normalized trace graph.
+    Structural,
+}
+
+impl TraceLens {
+    /// Advances through the stable collapsed, expanded, and structural cycle.
+    pub fn next(self) -> Self {
+        match self {
+            Self::Collapsed => Self::Expanded,
+            Self::Expanded => Self::Structural,
+            Self::Structural => Self::Collapsed,
+        }
+    }
+
+    /// Moves backward through the stable lens cycle.
+    pub fn previous(self) -> Self {
+        match self {
+            Self::Collapsed => Self::Structural,
+            Self::Expanded => Self::Collapsed,
+            Self::Structural => Self::Expanded,
+        }
+    }
+}
+
+/// Initial presentation scope requested by a browser host.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TraceStartScope {
+    /// Select the first structurally rooted thread that owns presentable events.
+    RootThread,
+    /// Select presentation events without a recorded thread owner.
+    Session,
+    /// Select one source-authored thread identity.
+    Thread(String),
+}
+
 /// Explicit view settings passed through trace row preparation and rendering.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TraceViewOptions {
@@ -59,6 +101,10 @@ pub struct TraceViewOptions {
     pub headers: HeaderMode,
     /// Inline content-preview display policy.
     pub preview: PreviewMode,
+    /// Lens installed when a selected session finishes loading.
+    pub initial_lens: TraceLens,
+    /// Presentation scope installed when a selected session finishes loading.
+    pub initial_scope: TraceStartScope,
 }
 
 impl Default for TraceViewOptions {
@@ -74,6 +120,8 @@ impl Default for TraceViewOptions {
             ],
             headers: HeaderMode::Auto,
             preview: PreviewMode::Auto,
+            initial_lens: TraceLens::Collapsed,
+            initial_scope: TraceStartScope::RootThread,
         }
     }
 }

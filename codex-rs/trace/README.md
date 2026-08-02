@@ -18,7 +18,7 @@ let session = catalog.load_session(session_id).await?;
 
 Each `TraceNode` carries a bounded `TraceRecordPresentation` for listing, styling, and visibility filters. `TraceNode::content_document()` extracts bounded semantic Markdown, text, JSON, or code without following a raw-payload reference; exact payload access remains explicitly lazy.
 
-The crate explicitly re-exports its supported model types from `src/model.rs`, structural and fact indexes from `src/index.rs` and `src/fact_index.rs`, typed facts from `src/facts.rs`, and the contained payload reader from `src/payload.rs`.
+The crate explicitly re-exports its supported model types from `src/model.rs`, the structural index from `src/index.rs`, typed facts and their index from the private `src/facts/` tree, presentation groups and queries from `src/presentation/`, and the contained payload reader from `src/payload.rs`.
 
 ## Source pipeline
 
@@ -36,17 +36,12 @@ Discovery is metadata-oriented and does not eagerly reduce every rich bundle. Pr
 | --- | --- |
 | `src/catalog.rs` | Repository configuration, bounded discovery, selection, summaries, and source reconciliation |
 | `src/graph.rs` | Bounded node admission, duplicate preservation, parent remapping, and conflict diagnostics |
-| `src/ordinary.rs` | Bounded plain or compressed ordinary-record reading and projection |
-| `src/ordinary_facts.rs` | Typed ordinary ordinal, ownership, and durable protocol-identity extraction |
-| `src/rich.rs` | Rich bundle reduction and normalized rich-node projection |
-| `src/rich_facts.rs` | Typed rich sequence, producer, runtime, compaction, and interaction extraction |
-| `src/rich_terminal_facts.rs` | Terminal ownership and model-observation correlation extraction |
+| `src/ordinary.rs`, `src/ordinary/` | Bounded ordinary reading, topology, typed facts, and projection |
+| `src/rich.rs`, `src/rich/` | Rich reduction, topology, typed facts, and terminal correlation extraction |
 | `src/model.rs` | Public catalog, node, locator, capability, evidence, limit, diagnostic, and search-result types |
-| `src/presentation.rs` | Record classification and bounded semantic content documents |
 | `src/index.rs` | Snapshot index for locator lookup, root and child traversal, and compact node positions |
-| `src/facts.rs` | Renderer-neutral source-order, ownership, availability, identity, and relation vocabulary |
-| `src/fact_index.rs` | Immutable typed-fact lookup and compatible-domain thread ordering |
-| `src/presentation_*.rs` | Renderer-neutral policy facts, lifecycle ownership, hierarchy reduction, summaries, validation, and immutable presentation queries |
+| `src/facts.rs`, `src/facts/` | Renderer-neutral order, ownership, correlation, activity, node-fact, and lookup-index vocabulary |
+| `src/presentation.rs`, `src/presentation/` | Record content, grouping, ordering, hierarchy, summaries, bounds, validation, and immutable presentation queries |
 | `src/search.rs` | Bounded attributed semantic search |
 | `src/payload.rs` | Canonically contained, size-limited, terminal-safe payload reads |
 | `src/*_tests.rs` | Sibling unit and integration evidence for each owning module |

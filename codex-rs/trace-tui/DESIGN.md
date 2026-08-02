@@ -16,11 +16,11 @@ catalog loading → root picker → selected-session loading → browser
                       └──────── error or back ───────────┘
 ```
 
-The picker owns precomputed normalized labels, cached query matches, selection, and query state over catalog summaries. The browser navigation controller owns a current container and locator-based return stack; sibling detail and search controllers own their caches, generations, visibility, and lazily installed payload content.
+The picker owns precomputed normalized labels, cached query matches, selection, and query state over catalog summaries. The browser controller owns one typed location and a reversible return stack; focused navigation, projection, display, structured-value, detail, and search modules own their orthogonal state and transformations.
 
 Every browser instance receives a unique epoch. Background session and payload results carry their root-session identity, while search, detail, and payload work is admitted through latest-request state containing the browser epoch, request generation, and complete view key. Results replace state only when all three remain current, including when the same session is reloaded into a replacement browser. Cancellation, invalidation, or failure returns to the previous stable screen and exposes an error without installing a partial session.
 
-The accepted successor architecture is defined by the [presentation-index contract](../../.ariadne/decisions/2026-07-31-trace-presentation-index-contract.md). Initial browser construction now materializes one immutable `PresentationIndex` beside `TraceIndex`; later lens phases will consume it instead of deriving groups, order, completeness, or summaries from rendered rows.
+The accepted architecture is defined by the [presentation-index contract](../../.ariadne/decisions/2026-07-31-trace-presentation-index-contract.md). Browser construction materializes one immutable `PresentationIndex` beside `TraceIndex`; collapsed and expanded lenses consume its precomputed groups and events instead of deriving grouping, order, completeness, or summaries from rendered rows.
 
 ## Event loop
 
@@ -46,9 +46,11 @@ The later removal of the overview border, shared horizontal scrolling, progressi
 
 ## Navigation
 
-Navigation is locator-based so filtering and sorting do not invalidate identity. Enter moves to a child container or opens leaf detail; `i` opens any record; back closes detail or restores the exact parent selection and viewport. There is no fold, expansion, pane, or disclosure state.
+Navigation uses canonical locators, group IDs, and typed JSON paths so filtering and projection changes do not make display indexes authoritative. Enter performs location-specific descent; `i` opens any canonical record; `s` opens normalized JSON; back restores the exact parent selection, viewport, and cached current-level rows. There is no fold, expansion, pane, or disclosure state.
 
-The successor navigation model generalizes a location to a thread, collapsed group timeline, expanded event timeline, entered group, canonical structural container, trace node, or browser-local structured value. Every descent frame stores its lens, locator or group ID, selection, viewport, and applicable horizontal state. Group identity and canonical locator remain distinct.
+`TraceLens` selects collapsed group, expanded event, or canonical structural projection. `TraceViewOptions` also accepts the initial session, root-thread, or named-thread scope. `Tab` and `Shift-Tab` cycle lenses; entered groups expose direct members, child groups, and resolved or unresolved evidence references. Group identity and canonical locator remain distinct.
+
+Structured JSON navigation retains typed object keys and array indexes and derives the displayed JSON Pointer from them. It is bounded to 64 levels, 4,096 direct children, 256 preview characters, and 64 KiB of scalar display. Structured locations are browser-local and never alter canonical topology or presentation membership.
 
 Collapsed conversation order follows group anchors. Expanded event order follows canonical order bands and annotates non-contiguous group membership. Entering a group shows its direct members and child groups in canonical chronology. Structural navigation continues to expose every retained node, including records hidden by default from conversation views.
 
@@ -58,7 +60,7 @@ Visible search runs over the enabled semantic classes, while all-record search m
 
 Rendering must scale with terminal area and visible detail, not with total trace size. Lists render a viewport window. Wrapped detail should be cached by locator, width, display mode, and payload state. Repeated labels and summaries should be prepared when state changes rather than serialized during every frame.
 
-The browser builds one `TraceIndex` and one `PresentationIndex` with its selected session and retains only the current container's filtered child positions. Ordinary cursor movement and redraw therefore touch a terminal-sized viewport rather than flattening or scanning the complete trace. The current structural lens does not yet render presentation groups; Phase 4 owns that navigation change.
+The browser builds one `TraceIndex` and one `PresentationIndex` with its selected session and retains only the current location's typed rows. Ordinary cursor movement and redraw therefore touch a terminal-sized viewport rather than flattening or scanning the complete trace. Reversible descent moves the immutable current-level row cache into its return frame; if visibility has not changed, returning restores it without rebuilding a large timeline.
 
 The detail cache is keyed by locator, width, content mode, and payload generation. Semantic extraction and host rendering run in generation-tagged background jobs over shared immutable trace/index snapshots, so resizing or changing modes cannot install stale work. Semantic detail is capped at 64 KiB and discloses truncation; loaded raw payloads remain bounded by the source reader. A deterministic 100,000-node profile measures current-level construction, return, and warm navigation without expansion-specific state.
 

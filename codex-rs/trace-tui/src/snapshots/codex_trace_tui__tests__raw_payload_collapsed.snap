@@ -2,7 +2,7 @@
 source: trace-tui/src/render_tests.rs
 expression: "render_app(&mut app, 100, 24)"
 ---
- Codex Trace  read-only · offline │ session rollout-ui
+ Codex Trace  read-only · offline │ session rollout-ui / structural
 
 ┌ Records ─────────────────────────────────────────────────────────────────────────────────────────┐
 │  NAME                   KIND CLASS        STATUS    TIME                 SOURCE   EVIDENCE       │
@@ -25,4 +25,4 @@ expression: "render_app(&mut app, 100, 24)"
 │                                                                                                  │
 │                                                                                                  │
 └──────────────────────────────────────────────────────────────────────────────────────────────────┘
- 2/2 visible · 0 hidden · 0 columns omitted  jk move  Enter descend  i detail  Esc parent  / search
+ 2/2 visible · 0 hidden · 0 columns omitted · Structural  jk move  Enter descend  i detail  s json

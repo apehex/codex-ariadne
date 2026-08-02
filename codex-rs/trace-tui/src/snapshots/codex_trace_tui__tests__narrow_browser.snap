@@ -2,10 +2,10 @@
 source: trace-tui/src/render_tests.rs
 expression: "render_app(&mut picker, 66, 24)"
 ---
- Codex Trace  read-only · offline │ session 019d0000-0000-7000-800
+ Codex Trace  read-only · offline │ thread 019d0000-0000-7000-8000
 
 ┌ Records ───────────────────────────────────────────────────────┐
-│▶ thread 019d0000-00… THR  structure    ordinary semantic       │
+│▶ event               user user         persist… semantic       │
 │                                                                │
 │                                                                │
 │                                                                │
@@ -25,4 +25,4 @@ expression: "render_app(&mut picker, 66, 24)"
 │                                                                │
 │                                                                │
 └────────────────────────────────────────────────────────────────┘
- 1/1 visible · 0 hidden · 2 columns omitted  jk move  Enter descen
+ 1/2 visible · 1 hidden · 2 columns omitted · Collapsed  jk move

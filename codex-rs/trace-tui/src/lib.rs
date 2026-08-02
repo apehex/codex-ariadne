@@ -22,8 +22,10 @@ pub use view::HeaderMode;
 pub use view::PlainTraceVisualRenderer;
 pub use view::PreviewMode;
 pub use view::TraceColumn;
+pub use view::TraceLens;
 pub use view::TraceRenderRequest;
 pub use view::TraceRowStyleRequest;
+pub use view::TraceStartScope;
 pub use view::TraceViewOptions;
 pub use view::TraceVisualRenderer;
 
@@ -328,3 +330,7 @@ impl Drop for TerminalRestore {
 #[cfg(test)]
 #[path = "render_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "phase4_tests.rs"]
+mod phase4_tests;

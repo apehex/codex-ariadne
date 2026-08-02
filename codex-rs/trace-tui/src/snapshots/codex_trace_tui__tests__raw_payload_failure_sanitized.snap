@@ -2,7 +2,7 @@
 source: trace-tui/src/render_tests.rs
 expression: rendered
 ---
- Codex Trace  read-only · offline │ session rollout-ui
+ Codex Trace  read-only · offline │ session / structural / payload SessionMetadata
 
 ┌ Detail · raw · v change view ────────────────────────────────────────────────────────────────────┐
 │kind: raw payload                                                                                 │

@@ -1,0 +1,18 @@
+---
+source: trace-tui/src/phase4_tests.rs
+expression: "render_app(&mut app, 88, 14)"
+---
+ Codex Trace  read-only · offline │ thread 019d0000-0000-7000-8000-000000000201 / collap
+
+┌ JSON value · /payload/message ───────────────────────────────────────────────────────┐
+│first line                                                                            │
+│second line                                                                           │
+│                                                                                      │
+│                                                                                      │
+│                                                                                      │
+│                                                                                      │
+│                                                                                      │
+│                                                                                      │
+│                                                                                      │
+└──────────────────────────────────────────────────────────────────────────────────────┘
+ jk scroll  PgUp/PgDn page  Esc back  q quit

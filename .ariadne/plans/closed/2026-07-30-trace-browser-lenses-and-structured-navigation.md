@@ -1,8 +1,8 @@
 # Trace Browser Lenses And Structured Navigation
 
-Updated: 2026-07-31
+Updated: 2026-08-02
 
-Status: open
+Status: closed
 
 ## Objective
 
@@ -58,3 +58,35 @@ The borderless redesign, horizontal styled-content viewport, parent transcript p
 ## Closure
 
 Close this plan after recording the final navigation-state model, lens defaults, shortcuts, bounds, snapshot paths, exact validation commands, and residual visual work transferred to Phase 5.
+
+## Implementation Receipt
+
+Phase 4 is implemented in `codex-trace-tui` without changing persisted formats or canonical topology. `BrowserState` owns one explicit `BrowserLocation`, a reversible stack of locator/group/path-based frames, and a cached current-level vector of typed `BrowserRow`s. The browser modules are partitioned into controller, location, navigation, projection, display, detail, search, row, and structured-value responsibilities; every production module remains below 500 lines.
+
+The default is the collapsed lens on the first structurally rooted thread that owns presentable events. `Tab` and `Shift-Tab` cycle collapsed, expanded, and structural lenses. Enter descends into groups, structural containers, group members, resolved references, or JSON children; `i` opens semantic detail; `s` opens normalized JSON; Escape or Backspace restores the exact prior selection, viewport, and cached row level. A caller may instead select the session or a named thread and any initial lens through `TraceViewOptions`.
+
+Collapsed rows come from `groups_in_scope`, expanded rows from `events_in_scope`, group rows from direct members, child groups, and retained references, and structural rows from `TraceIndex`. Group visibility and record-class visibility remain independent. The filter overlay can reveal presentation-hidden groups, and visible search excludes those groups outside the structural lens. All-record search retains its canonical structural fallback.
+
+Structured locations retain a typed key/index path and render an RFC 6901 pointer only as a label. They do not create trace nodes or presentation groups. Navigation is capped at 64 levels and 4,096 direct children; previews are capped at 256 characters and scalar display at 64 KiB. Depth, child, and scalar exhaustion is disclosed. Raw payload loading remains lazy and separate from normalized JSON navigation.
+
+The reviewed Phase 4 snapshots are:
+
+- `codex_trace_tui__phase4_tests__phase4_collapsed_groups.snap`
+- `codex_trace_tui__phase4_tests__phase4_entered_group.snap`
+- `codex_trace_tui__phase4_tests__phase4_expanded_events.snap`
+- `codex_trace_tui__phase4_tests__phase4_structured_scalar.snap`
+
+Existing narrow, medium, wide, detail, raw-payload, search, filter, and help snapshots were updated for the collapsed default, lens breadcrumbs, typed rows, and new shortcuts. The explicit 100,000-node profile initially found a full-timeline rebuild on group return; moving the immutable current-level row cache into navigation frames eliminated that regression and restored the existing navigation threshold.
+
+Phase 5 retains ownership of border removal, horizontal styled-content slicing and scrolling, wrapped/unwrapped layout options, footer collision policy, and the final semantic color treatment. Phase 6 retains parent transcript parity; Phase 7 retains live `/trace` and `Ctrl+T` integration.
+
+Validation on 2026-08-02:
+
+- `just test -p codex-trace`: 76 passed.
+- `just test -p codex-trace-tui`: 31 passed; the manual profile remained skipped by default.
+- `just test -p codex-trace-tui profile_hundred_thousand_node_navigation --run-ignored only`: passed after cached frame restoration was added.
+- `bazel test //codex-rs/trace:trace-unit-tests`: passed.
+- `bazel test //codex-rs/trace-tui:trace-tui-unit-tests`: passed under Bazel after normalized JSON object keys were made recursively deterministic across feature sets.
+- `cargo clippy -p codex-trace-tui --tests -- -D warnings`: passed.
+- `bazel build --config=argument-comment-lint //codex-rs/trace-tui:trace-tui-unit-tests`: passed.
+- `cargo insta pending-snapshots --manifest-path trace-tui/Cargo.toml`: no pending snapshots after direct review.

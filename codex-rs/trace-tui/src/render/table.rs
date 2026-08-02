@@ -1,18 +1,14 @@
 //! Data-driven overview column selection and row formatting.
 
-use codex_trace::TraceNode;
 use ratatui::text::Line;
 
-use super::class_name;
-use super::evidence_name;
-use super::kind_tag;
-use super::source_name;
 use super::status_name;
 use super::text::fit;
 use super::text::pad_fit;
 use super::text::single_line;
 use crate::PreviewMode;
 use crate::TraceColumn;
+use crate::browser::rows::BrowserRowDisplay;
 
 /// Width-dependent columns and elastic name/preview allocation.
 pub(super) struct ColumnPlan {
@@ -65,7 +61,7 @@ impl ColumnPlan {
         &self,
         selected: bool,
         label: &str,
-        node: Option<&TraceNode>,
+        row: Option<&BrowserRowDisplay>,
         preview: Option<&str>,
     ) -> Line<'static> {
         let marker = if selected { "▶ " } else { "  " };
@@ -76,8 +72,8 @@ impl ColumnPlan {
         );
         for column in &self.columns {
             let spec = column_spec(*column);
-            let value = node
-                .map(|node| column_value(*column, node))
+            let value = row
+                .map(|row| column_value(*column, row))
                 .unwrap_or_else(|| spec.header.to_string());
             text.push(' ');
             text.push_str(&pad_fit(&single_line(&value), spec.width));
@@ -155,18 +151,17 @@ fn required_width(columns: &[TraceColumn]) -> usize {
 }
 
 /// Extracts one label-free metadata value from a trace node.
-fn column_value(column: TraceColumn, node: &TraceNode) -> String {
+fn column_value(column: TraceColumn, row: &BrowserRowDisplay) -> String {
     match column {
-        TraceColumn::Kind => kind_tag(node.locator.kind).to_string(),
-        TraceColumn::Class => class_name(node.presentation.class).to_string(),
-        TraceColumn::Status => node
-            .presentation
+        TraceColumn::Kind => row.kind.clone(),
+        TraceColumn::Class => row.class_label.clone(),
+        TraceColumn::Status => row
             .status
             .map_or_else(|| "—".to_string(), |status| status_name(status).to_string()),
-        TraceColumn::Timestamp => node.timestamp.clone().unwrap_or_else(|| "—".to_string()),
-        TraceColumn::Source => source_name(node.provenance).to_string(),
-        TraceColumn::Evidence => evidence_name(node.evidence).to_string(),
-        TraceColumn::Identifier => node.locator.id.clone(),
+        TraceColumn::Timestamp => row.timestamp.clone(),
+        TraceColumn::Source => row.source.clone(),
+        TraceColumn::Evidence => row.evidence_label.clone(),
+        TraceColumn::Identifier => row.identifier.clone(),
     }
 }
 

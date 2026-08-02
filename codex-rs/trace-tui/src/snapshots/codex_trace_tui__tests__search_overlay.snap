@@ -2,7 +2,7 @@
 source: trace-tui/src/render_tests.rs
 expression: "render_app(&mut app, 100, 25)"
 ---
- Codex Trace  read-only · offline │ session 019d0000-0000-7000-8000-000000000101
+ Codex Trace  read-only · offline │ session 019d0000-0000-7000-8000-000000000101 / structural
 
 ┌ Records ─────────────────────────────────────────────────────────────────────────────────────────┐
 │  NAME                   KIND CLASS        STATUS    TIME                 SOURCE   EVIDENCE       │

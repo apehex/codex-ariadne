@@ -33,6 +33,7 @@ use self::overlay::render_detail;
 use self::overlay::render_filter;
 use self::overlay::render_help;
 use self::overlay::render_search;
+use self::overlay::render_structured_scalar;
 use self::picker::render_picker;
 use self::table::ColumnPlan;
 use self::text::multiline;
@@ -82,8 +83,10 @@ fn render_header(frame: &mut Frame<'_>, area: Rect, app: &App) {
 }
 
 fn render_browser(frame: &mut Frame<'_>, area: Rect, browser: &mut BrowserState) {
-    if browser.detail_open {
+    if browser.detail_open() {
         render_detail(frame, area, browser);
+    } else if browser.structured_is_scalar() {
+        render_structured_scalar(frame, area, browser);
     } else {
         render_level(frame, area, browser);
     }
@@ -134,24 +137,25 @@ fn render_level(frame: &mut Frame<'_>, area: Rect, browser: &mut BrowserState) {
             .style(ratatui::style::Style::new().bold().dim()),
         );
     }
-    for (offset, node) in rows.iter().enumerate() {
+    for (offset, row) in rows.iter().enumerate() {
         let selected = range.start + offset == browser.selected_index();
+        let display = browser.row_display(row);
         let line = columns.row(
             selected,
-            &node.label,
-            Some(node),
-            node.presentation.preview.as_deref(),
+            &display.label,
+            Some(&display),
+            display.preview.as_deref(),
         );
         let style = browser.renderer().row_style(TraceRowStyleRequest {
-            class: node.presentation.class,
-            status: node.presentation.status,
-            evidence: node.evidence,
+            class: display.class,
+            status: display.status,
+            evidence: display.evidence,
             selected,
         });
         items.push(ListItem::new(line).style(style));
     }
     if rows.is_empty() {
-        items.push(ListItem::new("No visible child records".dim()));
+        items.push(ListItem::new("No visible items at this level".dim()));
     }
     let selected = (!rows.is_empty())
         .then_some(browser.selected_index().saturating_sub(range.start) + header_rows);
@@ -179,17 +183,21 @@ fn render_footer(frame: &mut Frame<'_>, area: Rect, app: &App) {
         Screen::Browser(browser) if browser.filter_open => {
             " Space toggle  ↑↓ choose  Enter/Esc close  r reset  q quit "
         }
-        Screen::Browser(browser) if browser.detail_open => {
+        Screen::Browser(browser) if browser.detail_open() => {
             " jk scroll  PgUp/PgDn page  v rendered/text/raw  Esc back  q quit "
+        }
+        Screen::Browser(browser) if browser.structured_is_scalar() => {
+            " jk scroll  PgUp/PgDn page  Esc back  q quit "
         }
         Screen::Browser(browser) => {
             return frame.render_widget(
                 Paragraph::new(format!(
-                    " {}/{} visible · {} hidden · {} columns omitted  jk move  Enter descend  i detail  Esc parent  / search  f filter  ? help  q quit ",
+                    " {}/{} visible · {} hidden · {} columns omitted · {:?}  jk move  Enter descend  i detail  s json  Tab lens  Esc parent  / search  f filter  ? help  q quit ",
                     browser.row_count(),
                     browser.row_count() + browser.hidden_count(),
                     browser.hidden_count(),
                     browser.omitted_columns,
+                    browser.lens(),
                 ))
                 .dim(),
                 area,

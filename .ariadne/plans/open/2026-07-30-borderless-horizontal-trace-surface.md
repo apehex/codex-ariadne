@@ -1,6 +1,6 @@
 # Borderless Horizontal Trace Surface
 
-Updated: 2026-07-31
+Updated: 2026-08-02
 
 Status: open
 
@@ -12,7 +12,9 @@ Apply a borderless, full-body, horizontally navigable visual language to every s
 
 This is Phase 5 and supersedes the closed [Borderless Horizontal Trace Overview](../closed/2026-07-29-borderless-horizontal-trace-overview.md). The earlier plan targeted ungrouped record rows; this plan retains its useful canvas, footer, Unicode, bounds, and shortcut requirements while applying them to groups, events, trace nodes, and structured values.
 
-This phase depends on [Phase 4](2026-07-30-trace-browser-lenses-and-structured-navigation.md) and must preserve the renderer-neutral ownership, effective-visibility, and viewport bounds of the accepted [presentation-index contract](../../decisions/2026-07-31-trace-presentation-index-contract.md).
+This phase depends on [closed Phase 4](../closed/2026-07-30-trace-browser-lenses-and-structured-navigation.md) and must preserve the renderer-neutral ownership, effective-visibility, and viewport bounds of the accepted [presentation-index contract](../../decisions/2026-07-31-trace-presentation-index-contract.md).
+
+Phase 4 now supplies `TraceLens`, caller-selected initial scope, explicit group/detail/structured locations, typed current-level rows, cached reversible frames, presentation-hidden filtering, and bounded typed JSON paths. Phase 5 must extend those types rather than rebuilding groups or introducing a second navigation controller.
 
 ## Scope
 
@@ -27,6 +29,7 @@ Live `/trace`, `Ctrl+T` replacement, parent transcript grouping, persisted confi
 - Add explicit renderer-neutral enums for wrapped versus unwrapped content, stable versus adaptive columns, headers, preview policy, horizontal step, and bounded content width.
 - Keep content interpretation mode independent from line-layout mode.
 - Define separate overview and detail horizontal offsets and their reset, restore, resize, and clamp behavior.
+- Store horizontal offsets in the existing reversible location frames and keep them independent from `TraceLens`, JSON path, selection, and vertical viewport state.
 
 ### Movement 2: Build Styled Horizontal Viewports
 

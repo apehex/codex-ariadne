@@ -4,6 +4,7 @@ use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use codex_trace::PresentationIndex;
 use codex_trace::SanitizedPayload;
 use codex_trace::SearchHit;
 use codex_trace::SessionTrace;
@@ -17,6 +18,7 @@ use codex_trace::TraceRecordClass;
 use ratatui::text::Line;
 
 use crate::ContentMode;
+use crate::TraceLens;
 use crate::TraceRenderRequest;
 use crate::TraceVisualRenderer;
 use crate::browser::SearchScope;
@@ -83,7 +85,10 @@ pub(crate) struct SearchJob {
     pub(crate) scope: SearchScope,
     pub(crate) trace: Arc<SessionTrace>,
     pub(crate) index: Arc<TraceIndex>,
+    pub(crate) presentation: Arc<PresentationIndex>,
     pub(crate) visible_classes: BTreeSet<TraceRecordClass>,
+    pub(crate) lens: TraceLens,
+    pub(crate) show_hidden_groups: bool,
 }
 
 /// Attributed hits tagged with the submitted query generation.
@@ -91,6 +96,8 @@ pub(crate) struct SearchResult {
     pub(crate) token: RequestToken,
     pub(crate) query: String,
     pub(crate) scope: SearchScope,
+    pub(crate) lens: TraceLens,
+    pub(crate) show_hidden_groups: bool,
     pub(crate) hits: Vec<SearchHit>,
 }
 
@@ -105,13 +112,28 @@ impl SearchJob {
                     || self
                         .index
                         .node(&self.trace, &hit.locator)
-                        .is_some_and(|node| self.visible_classes.contains(&node.presentation.class))
+                        .is_some_and(|node| {
+                            if !self.visible_classes.contains(&node.presentation.class) {
+                                return false;
+                            }
+                            if self.lens == TraceLens::Structural || self.show_hidden_groups {
+                                return true;
+                            }
+                            self.index
+                                .node_position(&self.trace, &hit.locator)
+                                .and_then(|position| self.presentation.group_for_node(position))
+                                .is_none_or(|group| {
+                                    group.default_visibility == codex_trace::GroupVisibility::Shown
+                                })
+                        })
             })
             .collect();
         SearchResult {
             token: self.token,
             query: self.query,
             scope: self.scope,
+            lens: self.lens,
+            show_hidden_groups: self.show_hidden_groups,
             hits,
         }
     }
@@ -141,7 +163,7 @@ fn detail_document(
                     truncated: payload.truncated || display_truncated,
                 };
             }
-            let text = serde_json::to_string_pretty(&node.detail)
+            let text = serde_json::to_string_pretty(&sorted_json(&node.detail))
                 .unwrap_or_else(|_| node.detail.to_string());
             let (text, truncated) = bounded_text(text, STRUCTURED_DETAIL_LIMIT);
             TraceContentDocument {
@@ -150,6 +172,28 @@ fn detail_document(
                 truncated,
             }
         }
+    }
+}
+
+/// Clones normalized JSON with recursively sorted object keys for cross-build display stability.
+fn sorted_json(value: &serde_json::Value) -> serde_json::Value {
+    match value {
+        serde_json::Value::Object(map) => {
+            let mut entries = map.iter().collect::<Vec<_>>();
+            entries.sort_by_key(|(key, _)| *key);
+            let mut sorted = serde_json::Map::new();
+            for (key, value) in entries {
+                sorted.insert(key.clone(), sorted_json(value));
+            }
+            serde_json::Value::Object(sorted)
+        }
+        serde_json::Value::Array(values) => {
+            serde_json::Value::Array(values.iter().map(sorted_json).collect())
+        }
+        serde_json::Value::Null
+        | serde_json::Value::Bool(_)
+        | serde_json::Value::Number(_)
+        | serde_json::Value::String(_) => value.clone(),
     }
 }
 
@@ -164,3 +208,7 @@ fn bounded_text(mut text: String, byte_limit: usize) -> (String, bool) {
     text.truncate(boundary);
     (text, true)
 }
+
+#[cfg(test)]
+#[path = "jobs_tests.rs"]
+mod tests;

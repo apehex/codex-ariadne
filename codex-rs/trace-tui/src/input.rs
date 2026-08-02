@@ -84,7 +84,7 @@ pub(crate) fn handle_browser_key(browser: &mut BrowserState, key: KeyEvent) -> (
         };
         return (action, false);
     }
-    if browser.detail_open {
+    if browser.detail_open() {
         let action = match key.code {
             KeyCode::Char('q') => AppAction::Quit,
             KeyCode::Esc | KeyCode::Backspace => {
@@ -130,6 +130,40 @@ pub(crate) fn handle_browser_key(browser: &mut BrowserState, key: KeyEvent) -> (
                 AppAction::None
             }
             KeyCode::Char('r') => read_selected_payload(browser),
+            KeyCode::Char('?') => {
+                browser.help_open = true;
+                AppAction::None
+            }
+            _ => AppAction::None,
+        };
+        return (action, false);
+    }
+    if browser.structured_is_scalar() {
+        let action = match key.code {
+            KeyCode::Char('q') => AppAction::Quit,
+            KeyCode::Esc | KeyCode::Backspace => {
+                browser.back();
+                AppAction::None
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                browser.scroll_detail(/*delta*/ 1);
+                AppAction::None
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                browser.scroll_detail(/*delta*/ -1);
+                AppAction::None
+            }
+            KeyCode::PageDown => {
+                browser
+                    .scroll_detail(isize::try_from(browser.detail_page_size).unwrap_or(isize::MAX));
+                AppAction::None
+            }
+            KeyCode::PageUp => {
+                browser.scroll_detail(
+                    -isize::try_from(browser.detail_page_size).unwrap_or(isize::MAX),
+                );
+                AppAction::None
+            }
             KeyCode::Char('?') => {
                 browser.help_open = true;
                 AppAction::None
@@ -216,13 +250,25 @@ pub(crate) fn handle_browser_key(browser: &mut BrowserState, key: KeyEvent) -> (
         }
         KeyCode::Enter => {
             browser.enter_selected();
-            if browser.detail_open && browser.selected_is_raw_payload() {
+            if browser.detail_open() && browser.selected_is_raw_payload() {
                 return (read_selected_payload(browser), false);
             }
             AppAction::None
         }
+        KeyCode::Tab => {
+            browser.cycle_lens(/*reverse*/ false);
+            AppAction::None
+        }
+        KeyCode::BackTab => {
+            browser.cycle_lens(/*reverse*/ true);
+            AppAction::None
+        }
         KeyCode::Char('i') => {
             browser.open_detail();
+            AppAction::None
+        }
+        KeyCode::Char('s') => {
+            browser.open_structured();
             AppAction::None
         }
         KeyCode::Char('n') => {

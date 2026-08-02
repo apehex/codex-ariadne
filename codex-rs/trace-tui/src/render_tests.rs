@@ -206,7 +206,7 @@ async fn navigation_search_and_parent_keys_preserve_context() {
         browser
             .rows_window(0, browser.row_count())
             .iter()
-            .any(|node| node.label.contains(CHILD_ID))
+            .any(|row| browser.row_display(row).label.contains(CHILD_ID))
     );
     app.handle_key(key(KeyCode::Esc));
     assert_eq!(selected_id(&app), thread_id);
@@ -296,6 +296,7 @@ async fn view_options_control_columns_headers_and_previews() {
             columns: vec![TraceColumn::Class],
             headers: HeaderMode::Never,
             preview: PreviewMode::Never,
+            ..TraceViewOptions::default()
         },
         Arc::new(PlainTraceVisualRenderer),
     );
@@ -357,15 +358,7 @@ async fn stale_detail_render_cannot_replace_a_newer_content_mode() {
         .await;
     let trace = catalog.load_session(ROOT_ID).await.unwrap();
     let mut browser = super::browser::BrowserState::new(trace);
-    while browser
-        .selected_node()
-        .is_some_and(|node| node.locator.kind != TraceNodeKind::Thread)
-    {
-        browser.move_vertical(/*delta*/ 1);
-    }
-    browser.enter_selected();
-    browser.last();
-    browser.open_detail();
+    open_record_detail(&mut browser);
 
     assert!(browser.detail_lines(/*width*/ 40).is_empty());
     let rendered_job = browser.take_detail_render_job().unwrap();
@@ -540,6 +533,9 @@ async fn enter_requests_raw_payload_without_eagerly_reading_it() {
         /*preferred_session*/ None, /*auto_open_rich*/ false,
     );
     app.install_session(trace);
+    app.handle_key(key(KeyCode::Tab));
+    app.handle_key(key(KeyCode::Tab));
+    app.handle_key(key(KeyCode::Enter));
     app.handle_key(key(KeyCode::Down));
     assert_snapshot!("raw_payload_collapsed", render_app(&mut app, 100, 24));
     let AppAction::ReadPayload {
@@ -611,17 +607,15 @@ async fn profile_hundred_thousand_node_navigation() {
     let build_started = Instant::now();
     let mut browser = super::browser::BrowserState::new(trace);
     let build_elapsed = build_started.elapsed();
-    assert_eq!(browser.row_count(), 1);
+    assert!(browser.row_count() > 50_000);
 
-    while browser
-        .selected_node()
-        .is_some_and(|node| node.locator.kind != TraceNodeKind::Thread)
-    {
-        browser.move_vertical(/*delta*/ 1);
-    }
-    let entry_started = Instant::now();
-    browser.enter_selected();
-    let entry_elapsed = entry_started.elapsed();
+    let expanded_started = Instant::now();
+    browser.cycle_lens(/*reverse*/ false);
+    let expanded_elapsed = expanded_started.elapsed();
+    assert!(browser.row_count() > 50_000);
+    let structural_started = Instant::now();
+    browser.cycle_lens(/*reverse*/ false);
+    let structural_elapsed = structural_started.elapsed();
     assert!(browser.row_count() > 50_000);
 
     let mut samples = Vec::with_capacity(WARM_ACTIONS);
@@ -633,32 +627,27 @@ async fn profile_hundred_thousand_node_navigation() {
     samples.sort_unstable();
     let navigation_p95 = percentile_95(&samples);
 
+    browser.cycle_lens(/*reverse*/ false);
     browser.first();
-    browser.move_vertical(/*delta*/ 1);
     let mut entry_samples = Vec::with_capacity(LEVEL_ACTIONS);
     let mut return_samples = Vec::with_capacity(LEVEL_ACTIONS);
     for _ in 0..LEVEL_ACTIONS {
-        let return_started = Instant::now();
-        browser.back();
-        return_samples.push(return_started.elapsed());
-        while browser
-            .selected_node()
-            .is_some_and(|node| node.locator.kind != TraceNodeKind::Thread)
-        {
-            browser.move_vertical(/*delta*/ 1);
-        }
         let entry_started = Instant::now();
         browser.enter_selected();
         entry_samples.push(entry_started.elapsed());
+        let return_started = Instant::now();
+        browser.back();
+        return_samples.push(return_started.elapsed());
     }
     entry_samples.sort_unstable();
     return_samples.sort_unstable();
     let entry_p95 = percentile_95(&entry_samples);
     let return_p95 = percentile_95(&return_samples);
     eprintln!(
-        "trace-profile nodes=100000 build_ms={:.3} first_entry_ms={:.3} navigation_p95_ms={:.3} entry_p95_ms={:.3} return_p95_ms={:.3}",
+        "trace-profile nodes=100000 build_ms={:.3} expanded_ms={:.3} structural_ms={:.3} navigation_p95_ms={:.3} group_entry_p95_ms={:.3} return_p95_ms={:.3}",
         duration_ms(build_elapsed),
-        duration_ms(entry_elapsed),
+        duration_ms(expanded_elapsed),
+        duration_ms(structural_elapsed),
         duration_ms(navigation_p95),
         duration_ms(entry_p95),
         duration_ms(return_p95),
@@ -757,12 +746,7 @@ fn browser_with_epoch(
 }
 
 fn open_record_detail(browser: &mut super::browser::BrowserState) {
-    while browser
-        .selected_node()
-        .is_some_and(|node| node.locator.kind != TraceNodeKind::Thread)
-    {
-        browser.move_vertical(/*delta*/ 1);
-    }
+    move_browser_to_kind(browser, TraceNodeKind::Thread);
     browser.enter_selected();
     browser.last();
     browser.open_detail();
@@ -772,18 +756,33 @@ fn move_to_kind(app: &mut App, kind: TraceNodeKind) {
     let Screen::Browser(browser) = &mut app.screen else {
         panic!("expected browser");
     };
-    for index in 0..browser.row_count() {
-        if browser
-            .rows_window(index, 1)
-            .first()
-            .is_some_and(|node| node.locator.kind == kind)
-        {
+    move_browser_to_kind(browser, kind);
+}
+
+fn move_browser_to_kind(browser: &mut super::browser::BrowserState, kind: TraceNodeKind) {
+    while browser.lens() != super::TraceLens::Structural {
+        browser.cycle_lens(/*reverse*/ false);
+    }
+    if kind == TraceNodeKind::Thread {
+        while browser.back() {}
+    }
+    loop {
+        let position = (0..browser.row_count()).find(|index| {
+            browser
+                .rows_window(*index, 1)
+                .first()
+                .and_then(|row| browser.row_node(row))
+                .is_some_and(|node| node.locator.kind == kind)
+        });
+        if let Some(position) = position {
             browser.first();
-            browser.move_vertical(isize::try_from(index).unwrap());
+            browser.move_vertical(isize::try_from(position).unwrap());
             return;
         }
+        if !browser.back() {
+            panic!("expected {kind:?} row");
+        }
     }
-    panic!("expected {kind:?} row");
 }
 
 fn write_rollout(

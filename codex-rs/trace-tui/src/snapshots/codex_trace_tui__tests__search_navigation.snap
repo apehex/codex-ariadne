@@ -26,4 +26,4 @@ expression: "render_app(&mut app, 100, 25)"
 │                                                                                                  │
 │                                                                                                  │
 └──────────────────────────────────────────────────────────────────────────────────────────────────┘
- 3/3 visible · 0 hidden · 0 columns omitted  jk move  Enter descend  i detail  Esc parent  / search
+ 3/3 visible · 0 hidden · 0 columns omitted · Structural  jk move  Enter descend  i detail  s json

@@ -13,7 +13,7 @@ With no target, `codex trace` opens a searchable root-session picker. Supplying 
 
 ## Status
 
-The historical browser on the `ariadne` branch supports ordinary sessions, opt-in rich bundles, and merged roots with a picker, single-depth navigation, semantic search, visibility filters, full-screen record detail, diagnostics, and lazy raw payloads.
+The historical browser on the `ariadne` branch supports ordinary sessions, opt-in rich bundles, and merged roots with a picker, grouped and expanded conversation lenses, canonical structural navigation, group-member and thread-reference descent, structured JSON navigation, semantic search, visibility filters, full-screen record detail, diagnostics, and lazy raw payloads.
 
 The implementation receipt and validation are preserved in the [closed V1 plan](../../.ariadne/plans/closed/2026-07-25-ariadne-codex-trace-browser.md). Later timeline, diagnostic, live, and observability directions are non-executable items in the [roadmap](../../.ariadne/ROADMAP.md).
 
@@ -32,7 +32,7 @@ root session
     └── diagnostic
 ```
 
-Each screen shows one hierarchy level. Enter descends into a node with children or opens a leaf full-screen, `i` inspects any selected node, and Escape restores the prior selection and viewport. Breadcrumbs preserve orientation across delegated work.
+Each screen shows one level. The default collapsed lens shows one row per top-level presentation group; the expanded lens shows canonical primary events with their owning group; the structural lens exposes canonical containment. `Tab` and `Shift-Tab` cycle them. Enter descends according to row type, `i` inspects canonical detail, `s` navigates normalized JSON, and Escape restores the prior selection and viewport.
 
 List rows use an elastic name followed by label-free metadata values like a long directory listing. Wide terminals add optional headers and a bounded one-line content preview; narrower terminals drop lower-priority columns rather than introducing more panes.
 
@@ -56,6 +56,8 @@ The cross-crate [Ariadne design](../../.ariadne/DESIGN.md) defines source reconc
 | --- | --- |
 | `j` / `k`, arrows | Move |
 | Enter / `i` | Descend or inspect |
+| `s` | Navigate normalized JSON |
+| Tab / Shift-Tab | Next / previous lens |
 | Escape / Backspace | Detail or parent |
 | `gg` / `G` | First / last |
 | Page Up/Down, Ctrl-U/D | Page or half-page |

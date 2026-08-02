@@ -22,6 +22,7 @@ use super::mode_name;
 use super::render_message;
 use super::source_name;
 use super::status_name;
+use super::text::multiline;
 use super::text::single_line;
 use crate::browser::BrowserState;
 use crate::browser::SearchScope;
@@ -73,6 +74,56 @@ pub(super) fn render_detail(frame: &mut Frame<'_>, area: Rect, browser: &mut Bro
         Paragraph::new(visible).block(
             Block::default()
                 .title(format!(" Detail · {mode} · v change view "))
+                .borders(Borders::ALL),
+        ),
+        area,
+    );
+}
+
+/// Renders one interpreted structured scalar as a bounded multiline leaf.
+pub(super) fn render_structured_scalar(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    browser: &mut BrowserState,
+) {
+    let Some((text, truncated)) = browser.structured_scalar() else {
+        render_message(frame, area, "Structured value is unavailable", "JSON value");
+        return;
+    };
+    let width = usize::from(area.width.saturating_sub(4).max(1));
+    let height = usize::from(area.height.saturating_sub(2).max(1));
+    browser.detail_page_size = height;
+    let mut lines = multiline(&text)
+        .split('\n')
+        .flat_map(|line| {
+            let wrapped = textwrap::wrap(line, width);
+            if wrapped.is_empty() {
+                vec![Line::from("")]
+            } else {
+                wrapped
+                    .into_iter()
+                    .map(|line| Line::from(line.into_owned()))
+                    .collect()
+            }
+        })
+        .collect::<Vec<_>>();
+    if truncated {
+        lines.insert(0, Line::from("value truncated at 64 KiB").magenta());
+    }
+    let max_scroll = lines.len().saturating_sub(height);
+    browser.detail_scroll = browser.detail_scroll.min(max_scroll);
+    let visible = lines
+        .into_iter()
+        .skip(browser.detail_scroll)
+        .take(height)
+        .collect::<Vec<_>>();
+    let pointer = browser
+        .structured_pointer()
+        .unwrap_or_else(|| "/".to_string());
+    frame.render_widget(
+        Paragraph::new(visible).block(
+            Block::default()
+                .title(format!(" JSON value · {pointer} "))
                 .borders(Borders::ALL),
         ),
         area,
@@ -148,6 +199,14 @@ pub(super) fn render_filter(frame: &mut Frame<'_>, area: Rect, browser: &Browser
             };
             ListItem::new(format!("[{checked}] {}", class_name(*class)))
         })
+        .chain(std::iter::once(ListItem::new(format!(
+            "[{}] presentation-hidden groups",
+            if browser.hidden_groups_visible() {
+                "x"
+            } else {
+                " "
+            }
+        ))))
         .collect::<Vec<_>>();
     let mut state = ListState::default().with_selected(Some(browser.filter_selection.index()));
     frame.render_stateful_widget(
@@ -174,6 +233,8 @@ pub(super) fn render_help(frame: &mut Frame<'_>, area: Rect) {
             Line::from("gg / G          first / last"),
             Line::from("Enter           descend or open leaf"),
             Line::from("i / Esc         inspect / return"),
+            Line::from("s               navigate normalized JSON"),
+            Line::from("Tab / Shift-Tab cycle presentation lens"),
             Line::from("/ / g/          visible / all-record search"),
             Line::from("n / N           next / previous result"),
             Line::from("f / F           edit / reset filters"),

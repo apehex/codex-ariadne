@@ -2,7 +2,7 @@
 source: trace-tui/src/render_tests.rs
 expression: "render_app(&mut app, 100, 24)"
 ---
- Codex Trace  read-only · offline │ session 019d0000-0000-7000-8000-000000000101 / thread 019d0000-0
+ Codex Trace  read-only · offline │ thread 019d0000-0000-7000-8000-000000000101 / structural / event
 
 ┌ Detail · raw · v change view ────────────────────────────────────────────────────────────────────┐
 │kind: rollout record                                                                              │

@@ -85,17 +85,25 @@ impl BrowserState {
             let key = SearchRequestKey {
                 query: query.clone(),
                 scope,
+                lens: self.active_lens,
+                show_hidden_groups: self.show_hidden_groups,
             };
             let trace = Arc::clone(&self.trace);
             let index = Arc::clone(&self.index);
+            let presentation = Arc::clone(&self.presentation);
             let visible_classes = self.visible_classes.clone();
+            let lens = self.active_lens;
+            let show_hidden_groups = self.show_hidden_groups;
             self.search_requests.submit(key, move |token| SearchJob {
                 token,
                 query,
                 scope,
                 trace,
                 index,
+                presentation,
                 visible_classes,
+                lens,
+                show_hidden_groups,
             });
             return;
         }
@@ -122,6 +130,8 @@ impl BrowserState {
         let key = SearchRequestKey {
             query: result.query.clone(),
             scope: result.scope,
+            lens: result.lens,
+            show_hidden_groups: result.show_hidden_groups,
         };
         if !self.search_requests.accept(result.token, &key) {
             return;
@@ -161,16 +171,24 @@ impl BrowserState {
 
     /// Toggles the highlighted record class while preserving selection when possible.
     pub(crate) fn toggle_filter_class(&mut self) {
-        let Some(class) = Self::filter_classes()
-            .get(self.filter_selection.index())
-            .copied()
-        else {
+        let index = self.filter_selection.index();
+        if index == Self::filter_classes().len() {
+            self.show_hidden_groups = !self.show_hidden_groups;
+            self.visibility_generation = self.visibility_generation.wrapping_add(1);
+            let preferred = self.selected_row_id();
+            self.temporary_reveal = None;
+            self.invalidate_visible_search();
+            self.rebuild_rows(preferred.as_ref());
+            return;
+        }
+        let Some(class) = Self::filter_classes().get(index).copied() else {
             return;
         };
-        let preferred = self.selected_node().map(|node| node.locator.clone());
+        let preferred = self.selected_row_id();
         if !self.visible_classes.remove(&class) {
             self.visible_classes.insert(class);
         }
+        self.visibility_generation = self.visibility_generation.wrapping_add(1);
         self.temporary_reveal = None;
         self.invalidate_visible_search();
         self.rebuild_rows(preferred.as_ref());
@@ -179,12 +197,12 @@ impl BrowserState {
     /// Moves within the record-class filter menu.
     pub(crate) fn move_filter(&mut self, delta: isize) {
         self.filter_selection
-            .move_clamped(delta, Self::filter_classes().len());
+            .move_clamped(delta, Self::filter_classes().len() + 1);
     }
 
     /// Applies current class visibility and closes the filter menu.
     pub(crate) fn apply_filter(&mut self) {
-        let preferred = self.selected_node().map(|node| node.locator.clone());
+        let preferred = self.selected_row_id();
         self.rebuild_rows(preferred.as_ref());
         self.filter_open = false;
     }
@@ -192,6 +210,8 @@ impl BrowserState {
     /// Restores visibility for every record class.
     pub(crate) fn reset_filter(&mut self) {
         self.visible_classes = TraceRecordClass::ALL.into_iter().collect();
+        self.show_hidden_groups = false;
+        self.visibility_generation = self.visibility_generation.wrapping_add(1);
         self.temporary_reveal = None;
         self.invalidate_visible_search();
         self.apply_filter();
@@ -202,13 +222,18 @@ impl BrowserState {
         self.hidden_rows
     }
 
+    /// Returns whether presentation-hidden groups are explicitly visible.
+    pub(crate) fn hidden_groups_visible(&self) -> bool {
+        self.show_hidden_groups
+    }
+
     /// Invalidates generation-tagged search work.
     fn invalidate_search_job(&mut self) {
         self.search_requests.invalidate();
     }
 
     /// Invalidates visible-only results after record visibility changes.
-    fn invalidate_visible_search(&mut self) {
+    pub(super) fn invalidate_visible_search(&mut self) {
         if self
             .last_search
             .as_ref()
