@@ -3,26 +3,26 @@ source: trace-tui/src/render_tests.rs
 expression: "render_app(&mut app, 100, 24)"
 ---
  Codex Trace  read-only · offline │ session 019d0000-0000-7000-8000-000000000101 / thread 019d0000-0
+  NAME                       KIND CLASS        STATUS    TIME                 SOURCE   EVIDENCE
+ ·session meta┌ Trace navigation ────────────────────────────────────────────────────┐ semantic
+▶·event       │j/k, arrows     move                                                  │ semantic
+              │PgUp/PgDn       page                                                  │
+              │Ctrl-U/Ctrl-D   half-page                                             │
+              │h/l, arrows     horizontal step                                       │
+              │H/L             horizontal half-page                                  │
+              │0 / $           horizontal edges                                      │
+              │gg / G          first / last                                          │
+              │Enter           descend or open leaf                                  │
+              │i / Esc         inspect / return                                      │
+              │s               navigate normalized JSON                              │
+              │Tab / Shift-Tab cycle presentation lens                               │
+              │/ / g/          visible / all-record search                           │
+              │n / N           next / previous result                                │
+              │f / F           edit / reset filters                                  │
+              │v               rendered / text / raw                                 │
+              │? / q           help / quit                                           │
+              │                                                                      │
+              └──────────────────────────────────────────────────────────────────────┘
 
-┌ Records ─────────────────────────────────────────────────────────────────────────────────────────┐
-│  NAME                   KIND CLASS        STATUS    TIME                 SOURCE   EVIDENCE       │
-│  session metadata       REC  structure    —         2026-07-25T00:00:00Z ordinary semantic       │
-│▶ event      ┌ Trace navigation ────────────────────────────────────────────────────┐mantic       │
-│             │j/k, arrows     move                                                  │             │
-│             │PgUp/PgDn       page                                                  │             │
-│             │Ctrl-U/Ctrl-D   half-page                                             │             │
-│             │gg / G          first / last                                          │             │
-│             │Enter           descend or open leaf                                  │             │
-│             │i / Esc         inspect / return                                      │             │
-│             │s               navigate normalized JSON                              │             │
-│             │Tab / Shift-Tab cycle presentation lens                               │             │
-│             │/ / g/          visible / all-record search                           │             │
-│             │n / N           next / previous result                                │             │
-│             │f / F           edit / reset filters                                  │             │
-│             │v               rendered / text / raw                                 │             │
-│             │? / q           help / quit                                           │             │
-│             └──────────────────────────────────────────────────────────────────────┘             │
-│                                                                                                  │
-│                                                                                                  │
-└──────────────────────────────────────────────────────────────────────────────────────────────────┘
- ?/Esc close help  q quit
+
+?/Esc close help  q quit                                      structural · rendered · nowrap · x 0/0

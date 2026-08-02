@@ -3,32 +3,32 @@ source: trace-tui/src/render_tests.rs
 expression: "render_app(&mut picker, 140, 30)"
 ---
  Codex Trace  read-only · offline │ thread 019d0000-0000-7000-8000-000000000101 / collapsed
+  NAME                              KIND CLASS        STATUS    TIME                 SOURCE   EVIDENCE      PREVIEW
+▶◆event                             user user         —         —                    persist… semantic      root needle
 
-┌ Records ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
-│  NAME                   KIND CLASS        STATUS    TIME                 SOURCE   EVIDENCE      PREVIEW                                  │
-│▶ event                  user user         —         —                    persist… semantic      root needle                              │
-│                                                                                                                                          │
-│                                                                                                                                          │
-│                                                                                                                                          │
-│                                                                                                                                          │
-│                                                                                                                                          │
-│                                                                                                                                          │
-│                                                                                                                                          │
-│                                                                                                                                          │
-│                                                                                                                                          │
-│                                                                                                                                          │
-│                                                                                                                                          │
-│                                                                                                                                          │
-│                                                                                                                                          │
-│                                                                                                                                          │
-│                                                                                                                                          │
-│                                                                                                                                          │
-│                                                                                                                                          │
-│                                                                                                                                          │
-│                                                                                                                                          │
-│                                                                                                                                          │
-│                                                                                                                                          │
-│                                                                                                                                          │
-│                                                                                                                                          │
-└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
- 1/2 visible · 1 hidden · 0 columns omitted · Collapsed  jk move  Enter descend  i detail  s json  Tab lens  Esc parent  / search  f filter
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+jk h/l  Enter  Tab  ?                                                                                collapsed · rendered · nowrap · x 0/224

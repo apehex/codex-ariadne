@@ -4,8 +4,10 @@ use codex_trace::GroupId;
 use codex_trace::PresentationScope;
 use codex_trace::TraceNodeLocator;
 
+use crate::ContentMode;
 use crate::TraceLens;
 
+use super::horizontal::HorizontalState;
 use super::rows::BrowserRow;
 use super::rows::BrowserRowId;
 use super::structured::JsonPath;
@@ -37,6 +39,8 @@ pub(super) struct NavigationFrame {
     pub(super) selected: Option<BrowserRowId>,
     pub(super) viewport: usize,
     pub(super) detail_scroll: usize,
+    pub(super) content_mode: ContentMode,
+    pub(super) horizontal: HorizontalState,
     pub(super) rows: Vec<BrowserRow>,
     pub(super) hidden_rows: usize,
     pub(super) selected_index: usize,

@@ -3,26 +3,26 @@ source: trace-tui/src/render_tests.rs
 expression: "render_app(&mut app, 100, 24)"
 ---
  Codex Trace  read-only · offline │ session rollout-ui / structural
+  NAME                       KIND CLASS        STATUS    TIME                 SOURCE   EVIDENCE
+ ·thread /root               THR  structure    running   2026-07-28T00:00:00Z rich     semantic
+▶·payload SessionMetadata    RAW  raw          —         —                    rich     exact
 
-┌ Records ─────────────────────────────────────────────────────────────────────────────────────────┐
-│  NAME                   KIND CLASS        STATUS    TIME                 SOURCE   EVIDENCE       │
-│  thread /root           THR  structure    running   2026-07-28T00:00:00Z rich     semantic       │
-│▶ payload SessionMetada… RAW  raw          —         —                    rich     exact          │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-└──────────────────────────────────────────────────────────────────────────────────────────────────┘
- 2/2 visible · 0 hidden · 0 columns omitted · Structural  jk move  Enter descend  i detail  s json
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+jk h/l  Enter  Tab  ?                                         structural · rendered · nowrap · x 0/0

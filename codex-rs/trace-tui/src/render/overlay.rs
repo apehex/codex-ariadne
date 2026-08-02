@@ -18,12 +18,12 @@ use super::class_name;
 use super::evidence_name;
 use super::kind_name;
 use super::kind_tag;
-use super::mode_name;
 use super::render_message;
 use super::source_name;
 use super::status_name;
-use super::text::multiline;
 use super::text::single_line;
+use super::viewport::slice_line;
+use crate::ContentLayout;
 use crate::browser::BrowserState;
 use crate::browser::SearchScope;
 
@@ -45,11 +45,15 @@ pub(super) fn render_detail(frame: &mut Frame<'_>, area: Rect, browser: &mut Bro
         format!("evidence: {}", evidence_name(node.evidence)),
         format!("id: {}", single_line(&node.locator.id)),
     ];
-    let mode = mode_name(browser.content_mode);
-    let inner_width = usize::from(area.width.saturating_sub(4).max(1));
-    let inner_height = usize::from(area.height.saturating_sub(2).max(1));
+    let inner_width = usize::from(area.width);
+    let inner_height = usize::from(area.height).max(1);
+    let maximum_width = browser.options().max_content_width.columns();
+    let render_width = match browser.options().content_layout {
+        ContentLayout::Wrapped => inner_width.max(1),
+        ContentLayout::Unwrapped => maximum_width,
+    };
     browser.detail_page_size = inner_height;
-    let content = browser.detail_lines(inner_width).to_vec();
+    let content = browser.detail_lines(render_width).to_vec();
     let mut lines = metadata.into_iter().map(Line::from).collect::<Vec<_>>();
     if let Some(notice) = browser.payload_notice() {
         lines.push(Line::from(format!("raw: {}", single_line(notice))).red());
@@ -63,21 +67,31 @@ pub(super) fn render_detail(frame: &mut Frame<'_>, area: Rect, browser: &mut Bro
     } else {
         lines.extend(content.iter().cloned());
     }
+    let canvas_width = match browser.options().content_layout {
+        ContentLayout::Wrapped => inner_width,
+        ContentLayout::Unwrapped => browser
+            .detail_content_width()
+            .max(
+                lines
+                    .iter()
+                    .take(9)
+                    .map(Line::width)
+                    .max()
+                    .unwrap_or_default(),
+            )
+            .min(maximum_width),
+    };
+    browser.update_horizontal_extent(canvas_width, inner_width);
+    let horizontal_offset = browser.horizontal_position().0;
     let max_scroll = lines.len().saturating_sub(inner_height);
     browser.detail_scroll = browser.detail_scroll.min(max_scroll);
     let visible = lines
         .into_iter()
         .skip(browser.detail_scroll)
         .take(inner_height)
+        .map(|line| slice_line(&line, horizontal_offset, inner_width, maximum_width))
         .collect::<Vec<_>>();
-    frame.render_widget(
-        Paragraph::new(visible).block(
-            Block::default()
-                .title(format!(" Detail · {mode} · v change view "))
-                .borders(Borders::ALL),
-        ),
-        area,
-    );
+    frame.render_widget(Paragraph::new(visible), area);
 }
 
 /// Renders one interpreted structured scalar as a bounded multiline leaf.
@@ -86,48 +100,34 @@ pub(super) fn render_structured_scalar(
     area: Rect,
     browser: &mut BrowserState,
 ) {
-    let Some((text, truncated)) = browser.structured_scalar() else {
+    let width = usize::from(area.width);
+    let height = usize::from(area.height).max(1);
+    let maximum_width = browser.options().max_content_width.columns();
+    let layout_width = match browser.options().content_layout {
+        ContentLayout::Wrapped => width.max(1),
+        ContentLayout::Unwrapped => maximum_width,
+    };
+    let Some((line_count, content_width, _truncated)) =
+        browser.prepare_structured_layout(layout_width)
+    else {
         render_message(frame, area, "Structured value is unavailable", "JSON value");
         return;
     };
-    let width = usize::from(area.width.saturating_sub(4).max(1));
-    let height = usize::from(area.height.saturating_sub(2).max(1));
     browser.detail_page_size = height;
-    let mut lines = multiline(&text)
-        .split('\n')
-        .flat_map(|line| {
-            let wrapped = textwrap::wrap(line, width);
-            if wrapped.is_empty() {
-                vec![Line::from("")]
-            } else {
-                wrapped
-                    .into_iter()
-                    .map(|line| Line::from(line.into_owned()))
-                    .collect()
-            }
-        })
-        .collect::<Vec<_>>();
-    if truncated {
-        lines.insert(0, Line::from("value truncated at 64 KiB").magenta());
-    }
-    let max_scroll = lines.len().saturating_sub(height);
+    let canvas_width = match browser.options().content_layout {
+        ContentLayout::Wrapped => width,
+        ContentLayout::Unwrapped => content_width.min(maximum_width),
+    };
+    browser.update_horizontal_extent(canvas_width, width);
+    let horizontal_offset = browser.horizontal_position().0;
+    let max_scroll = line_count.saturating_sub(height);
     browser.detail_scroll = browser.detail_scroll.min(max_scroll);
-    let visible = lines
-        .into_iter()
-        .skip(browser.detail_scroll)
-        .take(height)
+    let visible = browser
+        .structured_lines_window(browser.detail_scroll, height)
+        .iter()
+        .map(|line| slice_line(line, horizontal_offset, width, maximum_width))
         .collect::<Vec<_>>();
-    let pointer = browser
-        .structured_pointer()
-        .unwrap_or_else(|| "/".to_string());
-    frame.render_widget(
-        Paragraph::new(visible).block(
-            Block::default()
-                .title(format!(" JSON value · {pointer} "))
-                .borders(Borders::ALL),
-        ),
-        area,
-    );
+    frame.render_widget(Paragraph::new(visible), area);
 }
 
 /// Renders the generation-tagged semantic search editor and result list.
@@ -230,6 +230,9 @@ pub(super) fn render_help(frame: &mut Frame<'_>, area: Rect) {
             Line::from("j/k, arrows     move"),
             Line::from("PgUp/PgDn       page"),
             Line::from("Ctrl-U/Ctrl-D   half-page"),
+            Line::from("h/l, arrows     horizontal step"),
+            Line::from("H/L             horizontal half-page"),
+            Line::from("0 / $           horizontal edges"),
             Line::from("gg / G          first / last"),
             Line::from("Enter           descend or open leaf"),
             Line::from("i / Esc         inspect / return"),

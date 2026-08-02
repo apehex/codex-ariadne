@@ -3,20 +3,20 @@ source: trace-tui/src/phase4_tests.rs
 expression: "render_app(&mut app, 110, 18)"
 ---
  Codex Trace  read-only · offline │ thread 019d0000-0000-7000-8000-000000000201 / collapsed / user
+  NAME                                 KIND CLASS        STATUS    TIME                 SOURCE   EVIDENCE
+▶•event · MessageContent               REC  user         —         2026-08-02T00:00:02Z ordinary semantic
 
-┌ Records ───────────────────────────────────────────────────────────────────────────────────────────────────┐
-│  NAME                             KIND CLASS        STATUS    TIME                 SOURCE   EVIDENCE       │
-│▶ event · MessageContent           REC  user         —         2026-08-02T00:00:02Z ordinary semantic       │
-│                                                                                                            │
-│                                                                                                            │
-│                                                                                                            │
-│                                                                                                            │
-│                                                                                                            │
-│                                                                                                            │
-│                                                                                                            │
-│                                                                                                            │
-│                                                                                                            │
-│                                                                                                            │
-│                                                                                                            │
-└────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
- 1/1 visible · 0 hidden · 0 columns omitted · Collapsed  jk move  Enter descend  i detail  s json  Tab lens  E
+
+
+
+
+
+
+
+
+
+
+
+
+
+jk h/l  Enter  Tab  ?                                                    collapsed · rendered · nowrap · x 0/0

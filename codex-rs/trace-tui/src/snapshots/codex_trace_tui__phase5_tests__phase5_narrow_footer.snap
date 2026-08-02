@@ -1,0 +1,14 @@
+---
+source: trace-tui/src/phase5_tests.rs
+expression: "render_app(&mut app, 30, 10)"
+---
+ Codex Trace  read-only · offl
+▶◆event                    use
+
+
+
+
+
+
+
+           C · R · NW · x 0/68

@@ -58,6 +58,7 @@ impl BrowserState {
         };
         self.stack.clear();
         self.viewport = 0;
+        self.reset_horizontal();
         let preferred = preferred_node.map(BrowserRowId::Node);
         self.rebuild_rows(preferred.as_ref());
     }
@@ -164,6 +165,7 @@ impl BrowserState {
                     structural_container: Some(parent),
                 };
                 self.viewport = 0;
+                self.reset_horizontal();
                 self.rebuild_rows(Some(&preferred));
                 return true;
             }
@@ -172,6 +174,8 @@ impl BrowserState {
         self.location = frame.location;
         self.viewport = frame.viewport;
         self.detail_scroll = frame.detail_scroll;
+        self.content_mode = frame.content_mode;
+        self.horizontal = frame.horizontal;
         self.sync_active_location();
         if frame.visibility_generation == self.visibility_generation {
             self.rows = frame.rows;
@@ -234,6 +238,7 @@ impl BrowserState {
                         structural_container: None,
                     };
                     self.viewport = 0;
+                    self.reset_horizontal();
                     self.rebuild_rows(Some(&preferred));
                     return;
                 }
@@ -245,6 +250,7 @@ impl BrowserState {
                         structural_container: None,
                     };
                     self.viewport = 0;
+                    self.reset_horizontal();
                     self.rebuild_rows(Some(&preferred));
                     return;
                 }
@@ -263,6 +269,7 @@ impl BrowserState {
         };
         self.stack.clear();
         self.viewport = 0;
+        self.reset_horizontal();
         self.temporary_reveal = Some(locator.clone());
         self.rebuild_rows(Some(&BrowserRowId::Node(locator)));
     }
@@ -276,6 +283,8 @@ impl BrowserState {
             selected,
             viewport: self.viewport,
             detail_scroll: self.detail_scroll,
+            content_mode: self.content_mode,
+            horizontal: self.horizontal,
             rows,
             hidden_rows: self.hidden_rows,
             selected_index,
@@ -284,6 +293,7 @@ impl BrowserState {
         self.location = location;
         self.viewport = 0;
         self.detail_scroll = 0;
+        self.reset_horizontal();
         self.content_mode = ContentMode::Rendered;
         self.sync_active_location();
         self.rebuild_rows(/*preferred*/ None);

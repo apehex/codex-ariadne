@@ -3,27 +3,27 @@ source: trace-tui/src/render_tests.rs
 expression: "render_app(&mut app, 100, 25)"
 ---
  Codex Trace  read-only · offline │ session 019d0000-0000-7000-8000-000000000101 / thread 019d0000-0
+  NAME                       KIND CLASS        STATUS    TIME                 SOURCE   EVIDENCE
+ ·thread 019d0000-0000-7000… THR  structure    —         2026-07-25T00:00:00Z ordinary semantic
+ ·session metadata           REC  structure    —         2026-07-25T00:00:00Z ordinary semantic
+▶·event                      REC  user         —         2026-07-25T00:00:01Z ordinary semantic
 
-┌ Records ─────────────────────────────────────────────────────────────────────────────────────────┐
-│  NAME                   KIND CLASS        STATUS    TIME                 SOURCE   EVIDENCE       │
-│  thread 019d0000-0000-… THR  structure    —         2026-07-25T00:00:00Z ordinary semantic       │
-│  session metadata       REC  structure    —         2026-07-25T00:00:00Z ordinary semantic       │
-│▶ event                  REC  user         —         2026-07-25T00:00:01Z ordinary semantic       │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-└──────────────────────────────────────────────────────────────────────────────────────────────────┘
- 3/3 visible · 0 hidden · 0 columns omitted · Structural  jk move  Enter descend  i detail  s json
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+jk h/l  Enter  Tab  ?                                         structural · rendered · nowrap · x 0/0

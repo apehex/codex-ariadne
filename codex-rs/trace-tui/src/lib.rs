@@ -17,8 +17,12 @@ pub use codex_trace::TraceContentDocument;
 pub use codex_trace::TraceContentFormat;
 pub use codex_trace::TraceRecordClass;
 pub use codex_trace::TraceStatus;
+pub use view::ColumnLayout;
+pub use view::ContentLayout;
 pub use view::ContentMode;
 pub use view::HeaderMode;
+pub use view::HorizontalStep;
+pub use view::LogicalContentWidth;
 pub use view::PlainTraceVisualRenderer;
 pub use view::PreviewMode;
 pub use view::TraceColumn;
@@ -334,3 +338,7 @@ mod tests;
 #[cfg(test)]
 #[path = "phase4_tests.rs"]
 mod phase4_tests;
+
+#[cfg(test)]
+#[path = "phase5_tests.rs"]
+mod phase5_tests;

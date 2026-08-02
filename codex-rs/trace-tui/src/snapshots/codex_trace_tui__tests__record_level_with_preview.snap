@@ -3,26 +3,26 @@ source: trace-tui/src/render_tests.rs
 expression: "render_app(&mut app, 150, 24)"
 ---
  Codex Trace  read-only · offline │ session 019d0000-0000-7000-8000-000000000101 / thread 019d0000-0000-7000-8000-000000000101 / structural
+  NAME                                        KIND CLASS        STATUS    TIME                 SOURCE   EVIDENCE      PREVIEW
+▶·session metadata                            REC  structure    —         2026-07-25T00:00:00Z ordinary semantic      cli
+ ·event                                       REC  user         —         2026-07-25T00:00:01Z ordinary semantic      first line second line with **ma
 
-┌ Records ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
-│  NAME                   KIND CLASS        STATUS    TIME                 SOURCE   EVIDENCE      PREVIEW                                            │
-│▶ session metadata       REC  structure    —         2026-07-25T00:00:00Z ordinary semantic      cli                                                │
-│  event                  REC  user         —         2026-07-25T00:00:01Z ordinary semantic      first line second line with **markdown**           │
-│                                                                                                                                                    │
-│                                                                                                                                                    │
-│                                                                                                                                                    │
-│                                                                                                                                                    │
-│                                                                                                                                                    │
-│                                                                                                                                                    │
-│                                                                                                                                                    │
-│                                                                                                                                                    │
-│                                                                                                                                                    │
-│                                                                                                                                                    │
-│                                                                                                                                                    │
-│                                                                                                                                                    │
-│                                                                                                                                                    │
-│                                                                                                                                                    │
-│                                                                                                                                                    │
-│                                                                                                                                                    │
-└────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
- 2/2 visible · 0 hidden · 0 columns omitted · Structural  jk move  Enter descend  i detail  s json  Tab lens  Esc parent  / search  f filter  ? help
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+jk h/l  Enter  Tab  ?                                                                                         structural · rendered · nowrap · x 0/224

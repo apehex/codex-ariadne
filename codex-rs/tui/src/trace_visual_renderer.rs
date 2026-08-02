@@ -12,6 +12,8 @@ use ratatui::text::Line;
 
 use crate::color::blend;
 use crate::markdown_render::render_markdown_text_with_width_and_cwd;
+use crate::render::highlight::MAX_HIGHLIGHT_LINE_BYTES;
+use crate::render::highlight::exceeds_highlight_limits;
 use crate::render::highlight::highlight_code_to_lines;
 use crate::style::user_message_bg_rgb;
 use crate::terminal_palette::best_color;
@@ -41,11 +43,11 @@ impl TraceVisualRenderer for CodexTraceVisualRenderer {
                 .lines
             }
             TraceContentFormat::Json => word_wrap_lines(
-                highlight_code_to_lines(&request.document.text, "json"),
+                highlight_safe_line_runs(&request.document.text, "json"),
                 request.width,
             ),
             TraceContentFormat::Code { language } => word_wrap_lines(
-                highlight_code_to_lines(&request.document.text, language),
+                highlight_safe_line_runs(&request.document.text, language),
                 request.width,
             ),
             TraceContentFormat::Text => wrap_plain(&request.document.text, request.width),
@@ -74,6 +76,36 @@ impl TraceVisualRenderer for CodexTraceVisualRenderer {
             style
         }
     }
+}
+
+fn highlight_safe_line_runs(code: &str, language: &str) -> Vec<Line<'static>> {
+    if exceeds_highlight_limits(code.len(), code.lines().count()) {
+        return highlight_code_to_lines(code, language);
+    }
+    let mut rendered = Vec::new();
+    let mut safe_run = String::new();
+    for line in code.split_inclusive('\n') {
+        let content = line.trim_end_matches(['\n', '\r']);
+        if content.len() <= MAX_HIGHLIGHT_LINE_BYTES {
+            safe_run.push_str(line);
+            continue;
+        }
+        flush_highlight_run(&mut rendered, &mut safe_run, language);
+        rendered.push(Line::from(content.to_string()));
+    }
+    flush_highlight_run(&mut rendered, &mut safe_run, language);
+    if rendered.is_empty() {
+        rendered.push(Line::from(""));
+    }
+    rendered
+}
+
+fn flush_highlight_run(rendered: &mut Vec<Line<'static>>, safe_run: &mut String, language: &str) {
+    if safe_run.is_empty() {
+        return;
+    }
+    rendered.extend(highlight_code_to_lines(safe_run, language));
+    safe_run.clear();
 }
 
 fn row_background_rgb(class: TraceRecordClass, background: (u8, u8, u8)) -> Option<(u8, u8, u8)> {

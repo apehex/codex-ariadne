@@ -34,9 +34,9 @@ root session
 
 Each screen shows one level. The default collapsed lens shows one row per top-level presentation group; the expanded lens shows canonical primary events with their owning group; the structural lens exposes canonical containment. `Tab` and `Shift-Tab` cycle them. Enter descends according to row type, `i` inspects canonical detail, `s` navigates normalized JSON, and Escape restores the prior selection and viewport.
 
-List rows use an elastic name followed by label-free metadata values like a long directory listing. Wide terminals add optional headers and a bounded one-line content preview; narrower terminals drop lower-priority columns rather than introducing more panes.
+List rows use an elastic name followed by label-free metadata values like a long directory listing. The default stable-column policy keeps configured metadata on one horizontally scrollable canvas; callers may select adaptive omission instead. Wide terminals add optional headers and a bounded one-line content preview.
 
-Detail view cycles through Rendered, Text, and Raw modes with `v`. Rendered mode delegates Markdown, JSON, and code to the parent Codex visual language, Text exposes decoded semantic content with real newlines, and Raw loads an exact bounded artifact lazily when one exists or clearly labels normalized JSON when it does not.
+The browser surface is borderless, with a pinned selection and group-boundary gutter, breadcrumbs above the content, and mode state at the bottom right. Detail view cycles through Rendered, Text, and Raw modes with `v`. Rendered mode delegates Markdown, JSON, and code to the parent Codex visual language, Text exposes decoded semantic content with real newlines, and Raw loads an exact bounded artifact lazily when one exists or clearly labels normalized JSON when it does not. Detail content is unwrapped by default and can instead be wrapped through `TraceViewOptions`.
 
 The synchronized cross-thread timeline, live following, export, annotations, and `/trace` integration are not part of the current browser.
 
@@ -61,6 +61,9 @@ The cross-crate [Ariadne design](../../.ariadne/DESIGN.md) defines source reconc
 | Escape / Backspace | Detail or parent |
 | `gg` / `G` | First / last |
 | Page Up/Down, Ctrl-U/D | Page or half-page |
+| Left/Right, `h`/`l` | Move horizontally by the configured step |
+| `H`/`L` | Move horizontally by half a viewport |
+| `0`/`$` | Move to the horizontal edges |
 | `/` / `g/` | Search visible / all records |
 | `n` / `N` | Next / previous match |
 | `f` / `F` | Edit / reset visibility filters |
@@ -68,7 +71,7 @@ The cross-crate [Ariadne design](../../.ariadne/DESIGN.md) defines source reconc
 | `?` | Navigation help |
 | `q` | Quit |
 
-Every terminal width shows one list or one detail surface. Responsive headers, columns, and previews change density without changing navigation.
+Every terminal width shows one list or one detail surface. Headers and rows share display-width-safe horizontal slicing, and the footer elides navigation hints before its right-aligned lens, interpretation, layout, and horizontal-position state.
 
 ## Development route
 

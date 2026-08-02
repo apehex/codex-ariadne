@@ -21,6 +21,7 @@ ratatui = { workspace = true }
 serde_json = { workspace = true }
 textwrap = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread"] }
+unicode-segmentation = { workspace = true }
 unicode-width = { workspace = true }
 
 [dev-dependencies]

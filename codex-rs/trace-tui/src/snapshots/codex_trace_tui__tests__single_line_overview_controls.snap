@@ -3,14 +3,14 @@ source: trace-tui/src/render_tests.rs
 expression: rendered
 ---
  Codex Trace  read-only · offline │ thread 019d0000-0000-7000-8000-000000000101 / collapsed
+  NAME                       KIND CLASS        STATUS    TIME                 SOURCE   EVIDENCE
+▶◆event                      user user         —         —                    persist… semantic
 
-┌ Records ─────────────────────────────────────────────────────────────────────────────────────────┐
-│  NAME                   KIND CLASS        STATUS    TIME                 SOURCE   EVIDENCE       │
-│▶ event                  user user         —         —                    persist… semantic       │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-└──────────────────────────────────────────────────────────────────────────────────────────────────┘
- 1/2 visible · 1 hidden · 0 columns omitted · Collapsed  jk move  Enter descend  i detail  s json  T
+
+
+
+
+
+
+
+jk h/l  Enter  Tab  ?                                          collapsed · rendered · nowrap · x 0/0

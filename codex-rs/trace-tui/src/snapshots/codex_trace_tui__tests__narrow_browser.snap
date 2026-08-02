@@ -3,26 +3,26 @@ source: trace-tui/src/render_tests.rs
 expression: "render_app(&mut picker, 66, 24)"
 ---
  Codex Trace  read-only · offline │ thread 019d0000-0000-7000-8000
+▶◆event                   user user         persist… semantic
 
-┌ Records ───────────────────────────────────────────────────────┐
-│▶ event               user user         persist… semantic       │
-│                                                                │
-│                                                                │
-│                                                                │
-│                                                                │
-│                                                                │
-│                                                                │
-│                                                                │
-│                                                                │
-│                                                                │
-│                                                                │
-│                                                                │
-│                                                                │
-│                                                                │
-│                                                                │
-│                                                                │
-│                                                                │
-│                                                                │
-│                                                                │
-└────────────────────────────────────────────────────────────────┘
- 1/2 visible · 1 hidden · 2 columns omitted · Collapsed  jk move
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+jk h/l  Enter  Tab  ?        collapsed · rendered · nowrap · x 0/0

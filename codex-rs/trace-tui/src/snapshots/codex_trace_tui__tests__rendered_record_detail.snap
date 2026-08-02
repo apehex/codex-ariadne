@@ -3,26 +3,26 @@ source: trace-tui/src/render_tests.rs
 expression: "render_app(&mut app, 100, 24)"
 ---
  Codex Trace  read-only · offline │ thread 019d0000-0000-7000-8000-000000000101 / structural / event
+kind: rollout record
+class: user
+status: —
+timestamp: 2026-07-25T00:00:01Z
+source: ordinary
+evidence: semantic
+id: ordinary:019d0000-0000-7000-8000-000000000101:2
 
-┌ Detail · rendered · v change view ───────────────────────────────────────────────────────────────┐
-│kind: rollout record                                                                              │
-│class: user                                                                                       │
-│status: —                                                                                         │
-│timestamp: 2026-07-25T00:00:01Z                                                                   │
-│source: ordinary                                                                                  │
-│evidence: semantic                                                                                │
-│id: ordinary:019d0000-0000-7000-8000-000000000101:2                                               │
-│                                                                                                  │
-│first line                                                                                        │
-│second line with **markdown**                                                                     │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-└──────────────────────────────────────────────────────────────────────────────────────────────────┘
- jk scroll  PgUp/PgDn page  v rendered/text/raw  Esc back  q quit
+first line
+second line with **markdown**
+
+
+
+
+
+
+
+
+
+
+
+
+jk scroll  h/l horizontal  v view  Esc back  q quit           structural · rendered · nowrap · x 0/0

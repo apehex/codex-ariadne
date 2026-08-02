@@ -17,18 +17,22 @@ use ratatui::widgets::ListState;
 use ratatui::widgets::Paragraph;
 use ratatui::widgets::Wrap;
 
-use crate::ContentMode;
 use crate::HeaderMode;
 use crate::TraceRowStyleRequest;
 use crate::app::App;
 use crate::app::Screen;
 use crate::browser::BrowserState;
 
+mod footer;
+mod gutter;
 mod overlay;
 mod picker;
 mod table;
 mod text;
+mod viewport;
 
+use self::footer::render_footer;
+use self::gutter::row_gutter;
 use self::overlay::render_detail;
 use self::overlay::render_filter;
 use self::overlay::render_help;
@@ -38,11 +42,17 @@ use self::picker::render_picker;
 use self::table::ColumnPlan;
 use self::text::multiline;
 use self::text::single_line;
+use self::viewport::slice_line;
 
 pub(crate) fn render(frame: &mut Frame<'_>, app: &mut App) {
+    let header_height = if matches!(&app.screen, Screen::Browser(_)) {
+        1
+    } else {
+        2
+    };
     let [header, body, footer] = Layout::vertical([
-        Constraint::Length(2),
-        Constraint::Min(3),
+        Constraint::Length(header_height),
+        Constraint::Min(2),
         Constraint::Length(1),
     ])
     .areas(frame.area());
@@ -91,7 +101,7 @@ fn render_browser(frame: &mut Frame<'_>, area: Rect, browser: &mut BrowserState)
         render_level(frame, area, browser);
     }
     if browser.help_open {
-        render_help(frame, centered(area, 72, 72));
+        render_help(frame, centered(area, 72, 90));
     } else if browser.search.is_some() {
         render_search(frame, centered(area, 78, 70), browser);
     } else if browser.filter_open {
@@ -105,17 +115,20 @@ fn render_level(frame: &mut Frame<'_>, area: Rect, browser: &mut BrowserState) {
         HeaderMode::Never => false,
         HeaderMode::Auto => area.width >= 78 && area.height >= 6,
     };
-    let inner_width = usize::from(area.width.saturating_sub(2).max(1));
+    let inner_width = usize::from(area.width.saturating_sub(2));
+    let maximum_width = browser.options().max_content_width.columns();
     let columns = ColumnPlan::new(
         &browser.options().columns,
         browser.options().preview,
+        browser.options().column_layout,
         inner_width,
+        maximum_width,
     );
     browser.omitted_columns = columns.omitted();
+    browser.update_horizontal_extent(columns.canvas_width(), inner_width);
+    let horizontal_offset = browser.horizontal_position().0;
     let header_rows = usize::from(show_headers);
-    let capacity = usize::from(area.height.saturating_sub(2))
-        .saturating_sub(header_rows)
-        .max(1);
+    let capacity = usize::from(area.height).saturating_sub(header_rows).max(1);
     browser.page_size = capacity;
     let range = viewport(
         browser.row_count(),
@@ -127,32 +140,33 @@ fn render_level(frame: &mut Frame<'_>, area: Rect, browser: &mut BrowserState) {
     let rows = browser.rows_window(range.start, range.len());
     let mut items = Vec::with_capacity(rows.len() + header_rows);
     if show_headers {
+        let header = columns.row("NAME", /*row*/ None, Some("PREVIEW"));
+        let mut spans = vec!["  ".into()];
+        spans.extend(slice_line(&header, horizontal_offset, inner_width, maximum_width).spans);
         items.push(
-            ListItem::new(columns.row(
-                /*selected*/ false,
-                "NAME",
-                /*node*/ None,
-                Some("PREVIEW"),
-            ))
-            .style(ratatui::style::Style::new().bold().dim()),
+            ListItem::new(Line::from(spans))
+                .style(ratatui::style::Style::new().bold().dim().underlined()),
         );
     }
     for (offset, row) in rows.iter().enumerate() {
-        let selected = range.start + offset == browser.selected_index();
+        let index = range.start + offset;
+        let selected = index == browser.selected_index();
         let display = browser.row_display(row);
-        let line = columns.row(
+        let line = columns.row(&display.label, Some(&display), display.preview.as_deref());
+        let mut spans = row_gutter(
+            row,
+            index.checked_sub(1).and_then(|index| browser.row_at(index)),
+            browser.row_at(index.saturating_add(1)),
             selected,
-            &display.label,
-            Some(&display),
-            display.preview.as_deref(),
         );
+        spans.extend(slice_line(&line, horizontal_offset, inner_width, maximum_width).spans);
         let style = browser.renderer().row_style(TraceRowStyleRequest {
             class: display.class,
             status: display.status,
             evidence: display.evidence,
             selected,
         });
-        items.push(ListItem::new(line).style(style));
+        items.push(ListItem::new(Line::from(spans)).style(style));
     }
     if rows.is_empty() {
         items.push(ListItem::new("No visible items at this level".dim()));
@@ -161,51 +175,10 @@ fn render_level(frame: &mut Frame<'_>, area: Rect, browser: &mut BrowserState) {
         .then_some(browser.selected_index().saturating_sub(range.start) + header_rows);
     let mut state = ListState::default().with_selected(selected);
     frame.render_stateful_widget(
-        List::new(items)
-            .block(Block::default().title(" Records ").borders(Borders::ALL))
-            .highlight_style(ratatui::style::Style::new().bold()),
+        List::new(items).highlight_style(ratatui::style::Style::new().bold()),
         area,
         &mut state,
     );
-}
-
-fn render_footer(frame: &mut Frame<'_>, area: Rect, app: &App) {
-    let help = match &app.screen {
-        Screen::Loading(_) => " Esc cancel  q quit ",
-        Screen::Picker(picker) if picker.search.is_some() => {
-            " type to filter  ↑↓ select  Enter open  Esc close search "
-        }
-        Screen::Picker(_) => " ↑↓/jk select  / filter  Enter open  q quit ",
-        Screen::Browser(browser) if browser.help_open => " ?/Esc close help  q quit ",
-        Screen::Browser(browser) if browser.search.is_some() => {
-            " type query  Enter search/open  ↑↓ choose  Esc close  q quit "
-        }
-        Screen::Browser(browser) if browser.filter_open => {
-            " Space toggle  ↑↓ choose  Enter/Esc close  r reset  q quit "
-        }
-        Screen::Browser(browser) if browser.detail_open() => {
-            " jk scroll  PgUp/PgDn page  v rendered/text/raw  Esc back  q quit "
-        }
-        Screen::Browser(browser) if browser.structured_is_scalar() => {
-            " jk scroll  PgUp/PgDn page  Esc back  q quit "
-        }
-        Screen::Browser(browser) => {
-            return frame.render_widget(
-                Paragraph::new(format!(
-                    " {}/{} visible · {} hidden · {} columns omitted · {:?}  jk move  Enter descend  i detail  s json  Tab lens  Esc parent  / search  f filter  ? help  q quit ",
-                    browser.row_count(),
-                    browser.row_count() + browser.hidden_count(),
-                    browser.hidden_count(),
-                    browser.omitted_columns,
-                    browser.lens(),
-                ))
-                .dim(),
-                area,
-            );
-        }
-        Screen::Error(_) => " Enter/q close ",
-    };
-    frame.render_widget(Paragraph::new(help).dim(), area);
 }
 
 fn render_message(frame: &mut Frame<'_>, area: Rect, message: &str, title: &str) {
@@ -259,14 +232,6 @@ fn viewport(
         current_start
     };
     start..start + capacity
-}
-
-fn mode_name(mode: ContentMode) -> &'static str {
-    match mode {
-        ContentMode::Rendered => "rendered",
-        ContentMode::Text => "text",
-        ContentMode::Raw => "raw",
-    }
 }
 
 fn class_name(class: TraceRecordClass) -> &'static str {

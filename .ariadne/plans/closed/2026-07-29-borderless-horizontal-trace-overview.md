@@ -95,7 +95,7 @@ Closing this plan does not close the quality remediation plan and does not autho
 
 This plan closed on 2026-07-30 without claiming implementation under its original ungrouped-row model.
 
-Its useful decisions and acceptance requirements for the shared horizontal canvas, footer placement, Unicode display width, bounded content, navigation shortcuts, snapshots, and structural performance were transferred to the [Borderless Horizontal Trace Surface](../open/2026-07-30-borderless-horizontal-trace-surface.md).
+Its useful decisions and acceptance requirements for the shared horizontal canvas, footer placement, Unicode display width, bounded content, navigation shortcuts, snapshots, and structural performance were transferred to the [closed Borderless Horizontal Trace Surface](2026-07-30-borderless-horizontal-trace-surface.md).
 
 The replacement is Phase 5 of the presentation program and depends on the earlier order, presentation-index, grouping-policy, and browser-lens phases. That dependency changes the unit rendered by the surface from an assumed record row to a lens-provided group, event, trace node, or structured value.
 

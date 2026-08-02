@@ -52,6 +52,7 @@ pub(crate) struct DetailRenderResult {
     pub(crate) token: RequestToken,
     pub(crate) truncated: bool,
     pub(crate) lines: Vec<Line<'static>>,
+    pub(crate) maximum_width: usize,
 }
 
 impl DetailRenderJob {
@@ -69,11 +70,18 @@ impl DetailRenderJob {
             width: self.key.width,
             cwd: self.cwd.as_deref(),
         });
+        let maximum_width = lines
+            .iter()
+            .map(Line::width)
+            .max()
+            .unwrap_or_default()
+            .min(self.key.width);
         DetailRenderResult {
             key: self.key,
             token: self.token,
             truncated: document.truncated,
             lines,
+            maximum_width,
         }
     }
 }

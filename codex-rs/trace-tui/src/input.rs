@@ -9,6 +9,7 @@ use crate::ContentMode;
 use crate::app::AppAction;
 use crate::browser::BrowserState;
 use crate::browser::SearchScope;
+use crate::browser::horizontal::HorizontalMotion;
 
 /// Applies one browser key and reports whether navigation should return to the picker.
 pub(crate) fn handle_browser_key(browser: &mut BrowserState, key: KeyEvent) -> (AppAction, bool) {
@@ -134,6 +135,7 @@ pub(crate) fn handle_browser_key(browser: &mut BrowserState, key: KeyEvent) -> (
                 browser.help_open = true;
                 AppAction::None
             }
+            _ if handle_horizontal_key(browser, key) => AppAction::None,
             _ => AppAction::None,
         };
         return (action, false);
@@ -168,6 +170,7 @@ pub(crate) fn handle_browser_key(browser: &mut BrowserState, key: KeyEvent) -> (
                 browser.help_open = true;
                 AppAction::None
             }
+            _ if handle_horizontal_key(browser, key) => AppAction::None,
             _ => AppAction::None,
         };
         return (action, false);
@@ -280,9 +283,23 @@ pub(crate) fn handle_browser_key(browser: &mut BrowserState, key: KeyEvent) -> (
             AppAction::None
         }
         KeyCode::Char('r') => read_selected_payload(browser),
+        _ if handle_horizontal_key(browser, key) => AppAction::None,
         _ => AppAction::None,
     };
     (action, false)
+}
+
+fn handle_horizontal_key(browser: &mut BrowserState, key: KeyEvent) -> bool {
+    let motion = match key.code {
+        KeyCode::Left | KeyCode::Char('h') => HorizontalMotion::SmallBackward,
+        KeyCode::Right | KeyCode::Char('l') => HorizontalMotion::SmallForward,
+        KeyCode::Char('H') => HorizontalMotion::HalfBackward,
+        KeyCode::Char('L') => HorizontalMotion::HalfForward,
+        KeyCode::Char('0') => HorizontalMotion::Start,
+        KeyCode::Char('$') => HorizontalMotion::End,
+        _ => return false,
+    };
+    browser.move_horizontal(motion)
 }
 
 /// Starts a bounded raw-payload read for the selected record when available.

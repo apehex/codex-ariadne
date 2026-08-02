@@ -29,12 +29,14 @@ use crate::request::BrowserEpoch;
 use crate::request::LatestRequest;
 use crate::selection::Selection;
 
+use self::horizontal::HorizontalState;
 use self::location::BrowserLocation;
 use self::location::NavigationFrame;
 use self::rows::BrowserRow;
 
 mod detail;
 mod display;
+pub(crate) mod horizontal;
 mod location;
 mod navigation;
 mod projection;
@@ -79,6 +81,7 @@ struct DetailCache {
     key: DetailRenderKey,
     truncated: bool,
     lines: Vec<Line<'static>>,
+    maximum_width: usize,
 }
 
 /// Typed state for one single-depth trace location or full-screen record.
@@ -98,6 +101,7 @@ pub(crate) struct BrowserState {
     pub(crate) page_size: usize,
     pub(crate) detail_scroll: usize,
     pub(crate) detail_page_size: usize,
+    horizontal: HorizontalState,
     pub(crate) content_mode: ContentMode,
     pub(crate) search: Option<SearchState>,
     last_search: Option<SearchState>,
@@ -115,6 +119,7 @@ pub(crate) struct BrowserState {
     payload_generation: u64,
     detail_cache: Option<DetailCache>,
     detail_requests: LatestRequest<DetailRenderKey, DetailRenderJob>,
+    structured_cache: Option<structured::StructuredLayoutCache>,
     renderer: Arc<dyn TraceVisualRenderer>,
     options: TraceViewOptions,
 }
@@ -189,6 +194,7 @@ impl BrowserState {
             page_size: 20,
             detail_scroll: 0,
             detail_page_size: 20,
+            horizontal: HorizontalState::default(),
             content_mode: ContentMode::Rendered,
             search: None,
             last_search: None,
@@ -206,6 +212,7 @@ impl BrowserState {
             payload_generation: 0,
             detail_cache: None,
             detail_requests: LatestRequest::new(epoch),
+            structured_cache: None,
             renderer,
             options,
         };
@@ -240,6 +247,10 @@ impl BrowserState {
     pub(super) fn rows_window(&self, start: usize, len: usize) -> &[BrowserRow] {
         let end = start.saturating_add(len).min(self.rows.len());
         self.rows.get(start..end).unwrap_or_default()
+    }
+
+    pub(super) fn row_at(&self, index: usize) -> Option<&BrowserRow> {
+        self.rows.get(index)
     }
 
     pub(crate) fn selected_node(&self) -> Option<&TraceNode> {

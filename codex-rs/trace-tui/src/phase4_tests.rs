@@ -11,7 +11,9 @@ use ratatui::backend::TestBackend;
 use serde_json::json;
 use tempfile::TempDir;
 
+use super::PlainTraceVisualRenderer;
 use super::TraceLens;
+use super::TraceViewOptions;
 use super::app::App;
 use super::app::Screen;
 use super::render;
@@ -121,7 +123,7 @@ async fn filter_overlay_can_reveal_presentation_hidden_groups() {
     assert_eq!(browser.row_count(), 2);
 }
 
-fn select_label(app: &mut App, expected: &str) {
+pub(super) fn select_label(app: &mut App, expected: &str) {
     let Screen::Browser(browser) = &mut app.screen else {
         panic!("expected browser");
     };
@@ -137,7 +139,11 @@ fn select_label(app: &mut App, expected: &str) {
     browser.move_vertical(isize::try_from(position).unwrap());
 }
 
-async fn test_app(messages: &[&str]) -> App {
+pub(super) async fn test_app(messages: &[&str]) -> App {
+    test_app_with_options(messages, TraceViewOptions::default()).await
+}
+
+pub(super) async fn test_app_with_options(messages: &[&str], options: TraceViewOptions) -> App {
     let temp = TempDir::new().unwrap();
     write_rollout(temp.path(), messages);
     let trace = TraceRepository::new(temp.path().to_path_buf())
@@ -146,8 +152,11 @@ async fn test_app(messages: &[&str]) -> App {
         .load_session(ROOT_ID)
         .await
         .unwrap();
-    let mut app = App::loading(
-        /*preferred_session*/ None, /*auto_open_rich*/ false,
+    let mut app = App::loading_with_visuals(
+        /*preferred_session*/ None,
+        /*auto_open_rich*/ false,
+        options,
+        std::sync::Arc::new(PlainTraceVisualRenderer),
     );
     app.install_session(trace);
     app
@@ -198,7 +207,7 @@ fn write_rollout(codex_home: &Path, messages: &[&str]) {
     .unwrap();
 }
 
-fn render_app(app: &mut App, width: u16, height: u16) -> String {
+pub(super) fn render_app(app: &mut App, width: u16, height: u16) -> String {
     let backend = TestBackend::new(width, height);
     let mut terminal = Terminal::new(backend).unwrap();
     terminal.draw(|frame| render::render(frame, app)).unwrap();
@@ -217,6 +226,6 @@ fn render_app(app: &mut App, width: u16, height: u16) -> String {
         .to_string()
 }
 
-fn key(code: KeyCode) -> KeyEvent {
+pub(super) fn key(code: KeyCode) -> KeyEvent {
     KeyEvent::from(code)
 }

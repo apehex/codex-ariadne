@@ -10,7 +10,7 @@ Demonstrate that Ariadne's grouped conversation lens can represent the semantic 
 
 ## Context
 
-This is Phase 6 and depends on the stable browser and visual surface from [Phase 5](2026-07-30-borderless-horizontal-trace-surface.md). It compares parent behavior against the accepted [presentation-index contract](../../decisions/2026-07-31-trace-presentation-index-contract.md) and treats `HistoryCell` output as a parity oracle rather than a model API. It is a comparison and compatibility phase, not authorization to replace `Ctrl+T` or add `/trace`.
+This is Phase 6 and depends on the stable browser and visual surface from [Phase 5](../closed/2026-07-30-borderless-horizontal-trace-surface.md). It compares parent behavior against the accepted [presentation-index contract](../../decisions/2026-07-31-trace-presentation-index-contract.md) and treats `HistoryCell` output as a parity oracle rather than a model API. It is a comparison and compatibility phase, not authorization to replace `Ctrl+T` or add `/trace`.
 
 The current parent TUI builds committed and live `HistoryCell`s through type-specific state machines. Ariadne must compare semantic outcomes rather than rendered bytes alone and must document where historical evidence cannot reproduce a transient live cell.
 

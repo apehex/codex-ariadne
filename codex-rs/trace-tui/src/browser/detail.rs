@@ -21,6 +21,7 @@ impl BrowserState {
     pub(crate) fn cycle_content_mode(&mut self) {
         self.content_mode = self.content_mode.next();
         self.detail_scroll = 0;
+        self.reset_horizontal();
         self.invalidate_detail();
     }
 
@@ -95,6 +96,13 @@ impl BrowserState {
             .is_some_and(|cache| cache.truncated)
     }
 
+    /// Returns the cached maximum logical content width without rescanning lines.
+    pub(crate) fn detail_content_width(&self) -> usize {
+        self.detail_cache
+            .as_ref()
+            .map_or(0, |cache| cache.maximum_width)
+    }
+
     /// Takes the next queued detail-render job.
     pub(crate) fn take_detail_render_job(&mut self) -> Option<DetailRenderJob> {
         self.detail_requests.take_job()
@@ -117,6 +125,7 @@ impl BrowserState {
             key: result.key,
             truncated: result.truncated,
             lines: result.lines,
+            maximum_width: result.maximum_width,
         });
     }
 

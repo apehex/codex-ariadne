@@ -136,8 +136,14 @@ async fn picker_and_adaptive_browser_have_stable_snapshots() {
         });
     }
 
-    let mut picker = App::loading(
-        /*preferred_session*/ None, /*auto_open_rich*/ false,
+    let mut picker = App::loading_with_visuals(
+        /*preferred_session*/ None,
+        /*auto_open_rich*/ false,
+        TraceViewOptions {
+            column_layout: super::ColumnLayout::Adaptive,
+            ..TraceViewOptions::default()
+        },
+        Arc::new(PlainTraceVisualRenderer),
     );
     assert!(matches!(
         picker.install_catalog(catalog.clone()),
@@ -643,14 +649,32 @@ async fn profile_hundred_thousand_node_navigation() {
     return_samples.sort_unstable();
     let entry_p95 = percentile_95(&entry_samples);
     let return_p95 = percentile_95(&return_samples);
+    let mut app = App::loading(
+        /*preferred_session*/ None, /*auto_open_rich*/ false,
+    );
+    app.screen = Screen::Browser(Box::new(browser));
+    render_app(&mut app, 120, 30);
+    let Screen::Browser(browser) = &mut app.screen else {
+        panic!("expected browser");
+    };
+    browser.move_horizontal(super::browser::horizontal::HorizontalMotion::End);
+    let mut render_samples = Vec::with_capacity(LEVEL_ACTIONS);
+    for _ in 0..LEVEL_ACTIONS {
+        let started = Instant::now();
+        render_app(&mut app, 120, 30);
+        render_samples.push(started.elapsed());
+    }
+    render_samples.sort_unstable();
+    let render_p95 = percentile_95(&render_samples);
     eprintln!(
-        "trace-profile nodes=100000 build_ms={:.3} expanded_ms={:.3} structural_ms={:.3} navigation_p95_ms={:.3} group_entry_p95_ms={:.3} return_p95_ms={:.3}",
+        "trace-profile nodes=100000 build_ms={:.3} expanded_ms={:.3} structural_ms={:.3} navigation_p95_ms={:.3} group_entry_p95_ms={:.3} return_p95_ms={:.3} horizontal_render_p95_ms={:.3}",
         duration_ms(build_elapsed),
         duration_ms(expanded_elapsed),
         duration_ms(structural_elapsed),
         duration_ms(navigation_p95),
         duration_ms(entry_p95),
         duration_ms(return_p95),
+        duration_ms(render_p95),
     );
     assert!(
         navigation_p95 < Duration::from_millis(/*millis*/ 50),
@@ -663,6 +687,10 @@ async fn profile_hundred_thousand_node_navigation() {
     assert!(
         return_p95 < Duration::from_millis(/*millis*/ 50),
         "warm level return p95 was {return_p95:?}"
+    );
+    assert!(
+        render_p95 < Duration::from_millis(/*millis*/ 50),
+        "horizontal viewport render p95 was {render_p95:?}"
     );
 }
 

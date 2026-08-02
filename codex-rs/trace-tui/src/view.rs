@@ -50,6 +50,82 @@ pub enum PreviewMode {
     Never,
 }
 
+/// Policy controlling line layout for detail and structured scalar content.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ContentLayout {
+    /// Wrap content to the current terminal width and disable horizontal movement.
+    Wrapped,
+    /// Preserve bounded logical lines and expose them through a horizontal viewport.
+    Unwrapped,
+}
+
+/// Policy controlling whether configured listing columns may be omitted responsively.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ColumnLayout {
+    /// Keep every configured column on the shared horizontal canvas.
+    Stable,
+    /// Omit lower-priority columns until the metadata prefix fits the viewport.
+    Adaptive,
+}
+
+/// Validated number of display cells moved by one small horizontal action.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HorizontalStep(u16);
+
+impl HorizontalStep {
+    /// Largest accepted small movement, preventing nonsensical configuration values.
+    pub const MAX: u16 = 256;
+
+    /// Creates a non-zero horizontal step within the supported bound.
+    pub const fn new(columns: u16) -> Option<Self> {
+        if columns == 0 || columns > Self::MAX {
+            None
+        } else {
+            Some(Self(columns))
+        }
+    }
+
+    /// Returns the configured movement in terminal display cells.
+    pub const fn columns(self) -> usize {
+        self.0 as usize
+    }
+}
+
+impl Default for HorizontalStep {
+    fn default() -> Self {
+        Self(4)
+    }
+}
+
+/// Validated maximum width of one logical horizontally scrollable line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LogicalContentWidth(u16);
+
+impl LogicalContentWidth {
+    /// Hard safety bound for one logical line.
+    pub const MAX: u16 = 4_096;
+
+    /// Creates a non-zero logical width within the terminal rendering bound.
+    pub const fn new(columns: u16) -> Option<Self> {
+        if columns == 0 || columns > Self::MAX {
+            None
+        } else {
+            Some(Self(columns))
+        }
+    }
+
+    /// Returns the logical-line limit in terminal display cells.
+    pub const fn columns(self) -> usize {
+        self.0 as usize
+    }
+}
+
+impl Default for LogicalContentWidth {
+    fn default() -> Self {
+        Self(Self::MAX)
+    }
+}
+
 /// Renderer-independent browser projection selected for one trace scope.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum TraceLens {
@@ -101,6 +177,14 @@ pub struct TraceViewOptions {
     pub headers: HeaderMode,
     /// Inline content-preview display policy.
     pub preview: PreviewMode,
+    /// Detail and structured-scalar line layout.
+    pub content_layout: ContentLayout,
+    /// Responsive or stable listing-column policy.
+    pub column_layout: ColumnLayout,
+    /// Display-cell movement used by Left, Right, `h`, and `l`.
+    pub horizontal_step: HorizontalStep,
+    /// Hard display-width limit for one logical line.
+    pub max_content_width: LogicalContentWidth,
     /// Lens installed when a selected session finishes loading.
     pub initial_lens: TraceLens,
     /// Presentation scope installed when a selected session finishes loading.
@@ -120,6 +204,10 @@ impl Default for TraceViewOptions {
             ],
             headers: HeaderMode::Auto,
             preview: PreviewMode::Auto,
+            content_layout: ContentLayout::Unwrapped,
+            column_layout: ColumnLayout::Stable,
+            horizontal_step: HorizontalStep::default(),
+            max_content_width: LogicalContentWidth::default(),
             initial_lens: TraceLens::Collapsed,
             initial_scope: TraceStartScope::RootThread,
         }
@@ -212,3 +300,7 @@ impl TraceVisualRenderer for PlainTraceVisualRenderer {
         Style::default()
     }
 }
+
+#[cfg(test)]
+#[path = "view_tests.rs"]
+mod tests;

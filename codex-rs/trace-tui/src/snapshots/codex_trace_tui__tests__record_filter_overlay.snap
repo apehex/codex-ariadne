@@ -3,30 +3,30 @@ source: trace-tui/src/render_tests.rs
 expression: "render_app(&mut app, 100, 28)"
 ---
  Codex Trace  read-only · offline │ session 019d0000-0000-7000-8000-000000000101 / thread 019d0000-0
+  NAME                       KIND CLASS        STATUS    TIME                 SOURCE   EVIDENCE
+ ·session metadata           REC  structure    —         2026-07-25T00:00:00Z ordinary semantic
+▶·event                      REC  user         —         2026-07-25T00:00:01Z ordinary semantic
+                        ┌ Filter · Space toggle · Enter apply ─────────────┐
+                        │▶ [x] structure                                   │
+                        │  [x] system                                      │
+                        │  [x] developer                                   │
+                        │  [x] user                                        │
+                        │  [x] assistant                                   │
+                        │  [x] commentary                                  │
+                        │  [x] final                                       │
+                        │  [x] reasoning                                   │
+                        │  [x] tool input                                  │
+                        │  [x] tool output                                 │
+                        │  [x] code                                        │
+                        │  [x] delegation                                  │
+                        │  [x] compaction                                  │
+                        │  [x] diagnostic                                  │
+                        │  [x] raw                                         │
+                        │  [x] other                                       │
+                        │  [ ] presentation-hidden groups                  │
+                        └──────────────────────────────────────────────────┘
 
-┌ Records ─────────────────────────────────────────────────────────────────────────────────────────┐
-│  NAME                   KIND CLASS        STATUS    TIME                 SOURCE   EVIDENCE       │
-│  session metadata       REC  structure    —         2026-07-25T00:00:00Z ordinary semantic       │
-│▶ event                ┌ Filter · Space toggle · Enter apply ─────────────┐rdinary semantic       │
-│                       │▶ [x] structure                                   │                       │
-│                       │  [x] system                                      │                       │
-│                       │  [x] developer                                   │                       │
-│                       │  [x] user                                        │                       │
-│                       │  [x] assistant                                   │                       │
-│                       │  [x] commentary                                  │                       │
-│                       │  [x] final                                       │                       │
-│                       │  [x] reasoning                                   │                       │
-│                       │  [x] tool input                                  │                       │
-│                       │  [x] tool output                                 │                       │
-│                       │  [x] code                                        │                       │
-│                       │  [x] delegation                                  │                       │
-│                       │  [x] compaction                                  │                       │
-│                       │  [x] diagnostic                                  │                       │
-│                       │  [x] raw                                         │                       │
-│                       │  [x] other                                       │                       │
-│                       └──────────────────────────────────────────────────┘                       │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-└──────────────────────────────────────────────────────────────────────────────────────────────────┘
- Space toggle  ↑↓ choose  Enter/Esc close  r reset  q quit
+
+
+
+Space toggle  ↑↓ choose  Enter/Esc close  r reset             structural · rendered · nowrap · x 0/0

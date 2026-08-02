@@ -1,0 +1,20 @@
+---
+source: trace-tui/src/phase5_tests.rs
+expression: "render_app(&mut app, 92, 16)"
+---
+ Codex Trace  read-only · offline │ session 019d0000-0000-7000-8000-000000000201 / thread 01
+                     KIND CLASS        STATUS    TIME                 SOURCE   EVIDENCE
+ ·n metadata         REC  structure    —         2026-08-02T00:00:00Z ordinary semantic
+▶·                   REC  user         —         2026-08-02T00:00:01Z ordinary semantic
+ ·                   REC  user         —         2026-08-02T00:00:02Z ordinary semantic
+ ·                   REC  user         —         2026-08-02T00:00:03Z ordinary semantic
+
+
+
+
+
+
+
+
+
+jk h/l  Enter  Tab  ?                                 structural · rendered · nowrap · x 6/6

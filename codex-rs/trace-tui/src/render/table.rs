@@ -1,53 +1,78 @@
-//! Data-driven overview column selection and row formatting.
+//! Data-driven listing canvas selection and row formatting.
 
 use ratatui::text::Line;
 
 use super::status_name;
-use super::text::fit;
 use super::text::pad_fit;
 use super::text::single_line;
+use crate::ColumnLayout;
 use crate::PreviewMode;
 use crate::TraceColumn;
 use crate::browser::rows::BrowserRowDisplay;
 
-/// Width-dependent columns and elastic name/preview allocation.
+const STABLE_NAME_WIDTH: usize = 24;
+const ADAPTIVE_NAME_WIDTH: usize = 14;
+const PREVIEW_WIDTH: usize = 256;
+
+/// Width-dependent columns and one stable logical canvas.
 pub(super) struct ColumnPlan {
     columns: Vec<TraceColumn>,
     name_width: usize,
     preview_width: Option<usize>,
     omitted: usize,
+    canvas_width: usize,
 }
 
 impl ColumnPlan {
-    /// Selects configured columns and allocates one complete overview row.
-    pub(super) fn new(requested: &[TraceColumn], preview_mode: PreviewMode, width: usize) -> Self {
+    /// Selects configured columns without inspecting any trace row.
+    pub(super) fn new(
+        requested: &[TraceColumn],
+        preview_mode: PreviewMode,
+        column_layout: ColumnLayout,
+        viewport_width: usize,
+        maximum_width: usize,
+    ) -> Self {
         let mut columns = requested.to_vec();
-        while required_width(&columns) > width {
-            let Some((index, _)) = columns
-                .iter()
-                .enumerate()
-                .max_by_key(|(_, column)| column_spec(**column).drop_priority)
-            else {
-                break;
-            };
-            columns.remove(index);
-        }
-        let fixed = fixed_width(&columns);
-        let allow_preview = match preview_mode {
-            PreviewMode::Auto => width.saturating_sub(fixed + 26) >= 32,
-            PreviewMode::Always => width.saturating_sub(fixed + 18) >= 12,
-            PreviewMode::Never => false,
+        let minimum_name = match column_layout {
+            ColumnLayout::Stable => STABLE_NAME_WIDTH,
+            ColumnLayout::Adaptive => ADAPTIVE_NAME_WIDTH,
         };
-        let preview_width = allow_preview.then_some(width.saturating_sub(fixed + 26));
-        let name_width = width
-            .saturating_sub(fixed + preview_width.unwrap_or_default() + 2)
-            .max(8);
+        if column_layout == ColumnLayout::Adaptive {
+            while minimum_name.saturating_add(fixed_width(&columns)) > viewport_width {
+                let Some((index, _)) = columns
+                    .iter()
+                    .enumerate()
+                    .max_by_key(|(_, column)| column_spec(**column).drop_priority)
+                else {
+                    break;
+                };
+                columns.remove(index);
+            }
+        }
         let omitted = requested.len().saturating_sub(columns.len());
+        let fixed = fixed_width(&columns);
+        let preview_threshold = match preview_mode {
+            PreviewMode::Auto => 32,
+            PreviewMode::Always => 1,
+            PreviewMode::Never => usize::MAX,
+        };
+        let preview_width = (viewport_width.saturating_sub(fixed + minimum_name)
+            >= preview_threshold)
+            .then_some(PREVIEW_WIDTH.min(maximum_width));
+        let initial_preview = preview_width.map_or(0, |_| preview_threshold.saturating_add(1));
+        let name_width = viewport_width
+            .saturating_sub(fixed + initial_preview)
+            .max(minimum_name);
+        let canvas_width = name_width
+            .saturating_add(fixed)
+            .saturating_add(preview_width.map_or(0, |width| width.saturating_add(1)))
+            .min(maximum_width);
         Self {
             columns,
             name_width,
             preview_width,
             omitted,
+            canvas_width,
         }
     }
 
@@ -56,20 +81,19 @@ impl ColumnPlan {
         self.omitted
     }
 
-    /// Formats headers or one semantic record through the same layout.
+    /// Returns the schema-derived logical canvas width.
+    pub(super) fn canvas_width(&self) -> usize {
+        self.canvas_width
+    }
+
+    /// Formats headers or one semantic row on the common logical canvas.
     pub(super) fn row(
         &self,
-        selected: bool,
         label: &str,
         row: Option<&BrowserRowDisplay>,
         preview: Option<&str>,
     ) -> Line<'static> {
-        let marker = if selected { "▶ " } else { "  " };
-        let label = single_line(label);
-        let mut text = format!(
-            "{marker}{}",
-            pad_fit(&label, self.name_width.saturating_sub(2))
-        );
+        let mut text = pad_fit(&single_line(label), self.name_width);
         for column in &self.columns {
             let spec = column_spec(*column);
             let value = row
@@ -80,7 +104,7 @@ impl ColumnPlan {
         }
         if let Some(preview_width) = self.preview_width {
             text.push(' ');
-            text.push_str(&fit(
+            text.push_str(&pad_fit(
                 &single_line(preview.unwrap_or_default()),
                 preview_width,
             ));
@@ -89,14 +113,12 @@ impl ColumnPlan {
     }
 }
 
-/// Static display policy for one configurable trace column.
 struct ColumnSpec {
     header: &'static str,
     width: usize,
     drop_priority: u8,
 }
 
-/// Returns all display policy owned by one column.
 fn column_spec(column: TraceColumn) -> ColumnSpec {
     match column {
         TraceColumn::Kind => ColumnSpec {
@@ -137,7 +159,6 @@ fn column_spec(column: TraceColumn) -> ColumnSpec {
     }
 }
 
-/// Returns the fixed width occupied by metadata columns and separators.
 fn fixed_width(columns: &[TraceColumn]) -> usize {
     columns
         .iter()
@@ -145,12 +166,6 @@ fn fixed_width(columns: &[TraceColumn]) -> usize {
         .sum()
 }
 
-/// Returns the minimum width before another metadata column must be dropped.
-fn required_width(columns: &[TraceColumn]) -> usize {
-    14 + fixed_width(columns)
-}
-
-/// Extracts one label-free metadata value from a trace node.
 fn column_value(column: TraceColumn, row: &BrowserRowDisplay) -> String {
     match column {
         TraceColumn::Kind => row.kind.clone(),

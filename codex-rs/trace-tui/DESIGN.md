@@ -36,17 +36,19 @@ The root picker shows bounded summary metadata and source badges without loading
 
 The browser always renders one full-width surface: either the current container's direct children or full-screen detail for one record.
 
-Listing rows contain an elastic name, caller-selected aligned metadata values without labels, optional headers, and an opportunistic bounded preview. Lower-priority columns and previews disappear as width contracts; navigation and record availability do not change with width.
+Listing rows contain an elastic name, caller-selected aligned metadata values without labels, optional headers, and an opportunistic bounded preview. Stable columns are the default and remain available through horizontal scrolling; the caller may instead select adaptive priority-based omission. Navigation and record availability do not change with width.
 
 One data-driven column plan owns metadata headers, widths, omission priorities, value extraction, and row assembly. Overview labels, metadata, previews, picker rows, search snippets, and identifiers use a terminal-safe single-line policy; intentional line breaks are preserved only by the separate multiline policy used for detail and message content. All list controllers share one bounded-selection primitive rather than duplicating index arithmetic.
 
-Every row passes through the injected `TraceVisualRenderer`. The parent Codex TUI adapter reuses its terminal palette, message backgrounds, Markdown renderer, and syntax highlighter, while the standalone fallback remains deterministic and plain. Role and type remain visible in text so color is never the sole distinction.
+Every row passes through the injected `TraceVisualRenderer`. The parent Codex TUI adapter reuses its terminal palette, message backgrounds, Markdown renderer, and syntax highlighter, while the standalone fallback remains deterministic and plain. Oversized JSON or code lines fall back individually without disabling syntax colors for surrounding safe runs. Role, type, selection, and group boundaries remain visible through text and pinned gutter glyphs so color is never the sole distinction.
 
-The later removal of the overview border, shared horizontal scrolling, progressively appended bounded content, and footer mode placement are specified in [Phase 5, the open borderless-surface plan](../../.ariadne/plans/open/2026-07-30-borderless-horizontal-trace-surface.md). They are not part of the current rendering contract until the preceding presentation-index, grouping, and lens phases establish the rendered units and that plan resolves its interaction and configuration decisions.
+Browser lists, details, and structured scalar leaves render directly in the body without a main-surface frame. Breadcrumbs remain above the content; focus-capturing search, filter, and help overlays remain framed. The footer preserves right-aligned lens, interpretation, wrapping, and horizontal-position state, dropping left hints before compacting that state.
 
 ## Navigation
 
 Navigation uses canonical locators, group IDs, and typed JSON paths so filtering and projection changes do not make display indexes authoritative. Enter performs location-specific descent; `i` opens any canonical record; `s` opens normalized JSON; back restores the exact parent selection, viewport, and cached current-level rows. There is no fold, expansion, pane, or disclosure state.
+
+Left/Right and `h`/`l` move by the caller-selected small display-cell step, `H`/`L` move by half the visible data width, and `0`/`$` reach horizontal edges. Listing and leaf offsets are independent and stored in reversible frames. New descent and lens locations start at zero; return restores them; resize preserves and clamps them. Wrapped leaf content has no horizontal movement, while listings remain single-line canvases in either content layout.
 
 `TraceLens` selects collapsed group, expanded event, or canonical structural projection. `TraceViewOptions` also accepts the initial session, root-thread, or named-thread scope. `Tab` and `Shift-Tab` cycle lenses; entered groups expose direct members, child groups, and resolved or unresolved evidence references. Group identity and canonical locator remain distinct.
 
@@ -58,11 +60,11 @@ Visible search runs over the enabled semantic classes, while all-record search m
 
 ## Rendering and performance contract
 
-Rendering must scale with terminal area and visible detail, not with total trace size. Lists render a viewport window. Wrapped detail should be cached by locator, width, display mode, and payload state. Repeated labels and summaries should be prepared when state changes rather than serialized during every frame.
+Rendering must scale with terminal area and visible detail, not with total trace size. Lists render a viewport window against a schema-derived canvas width, so maximum horizontal offset never requires scanning the current level. Styled slicing operates on grapheme display widths, preserves Ratatui spans, and substitutes blank cells when a viewport clips a wide grapheme. Repeated labels and summaries should be prepared when state changes rather than serialized during every frame.
 
 The browser builds one `TraceIndex` and one `PresentationIndex` with its selected session and retains only the current location's typed rows. Ordinary cursor movement and redraw therefore touch a terminal-sized viewport rather than flattening or scanning the complete trace. Reversible descent moves the immutable current-level row cache into its return frame; if visibility has not changed, returning restores it without rebuilding a large timeline.
 
-The detail cache is keyed by locator, width, content mode, and payload generation. Semantic extraction and host rendering run in generation-tagged background jobs over shared immutable trace/index snapshots, so resizing or changing modes cannot install stale work. Semantic detail is capped at 64 KiB and discloses truncation; loaded raw payloads remain bounded by the source reader. A deterministic 100,000-node profile measures current-level construction, return, and warm navigation without expansion-specific state.
+The detail cache is keyed by locator, logical render width, content mode, and payload generation and retains its maximum line width. Semantic extraction and host rendering run in generation-tagged background jobs over shared immutable trace/index snapshots, so resizing or changing modes cannot install stale work. Structured scalar wrapping is cached by locator, typed-path display pointer, width, and layout. Semantic detail is capped at 64 KiB, logical lines at 4,096 display cells, and truncation remains disclosed; loaded raw payloads remain bounded by the source reader. A deterministic 100,000-node profile measures current-level construction, return, warm navigation, and horizontally offset viewport rendering.
 
 Do not solve a rendering freeze by dropping provenance, truncating without disclosure, eagerly loading raw payloads, or hiding malformed nodes.
 
@@ -90,4 +92,4 @@ Errors should identify the failed operation without echoing excessive sensitive 
 
 State-transition tests cover key actions, loading, cancellation, errors, level return, search, filters, detail modes, and payload installation. Ratatui snapshots cover narrow, medium, and wide layouts using deterministic synthetic data.
 
-The ignored `profile_hundred_thousand_node_navigation` test deterministically builds a limit-sized ordinary trace, records index/browser construction, first large-level entry, 1,000 warm navigation samples, and repeated level return/entry samples, and enforces a 50 ms p95 for navigation and entry. End-to-end tests operate without network or authentication and compare every input byte before and after browsing.
+The ignored `profile_hundred_thousand_node_navigation` test deterministically builds a limit-sized ordinary trace, records index/browser construction, first large-level entry, 1,000 warm navigation samples, repeated level return/entry samples, and horizontally offset borderless renders, and enforces a 50 ms p95 for repeated operations. End-to-end tests operate without network or authentication and compare every input byte before and after browsing.

@@ -5,7 +5,9 @@ use codex_trace_tui::TraceRecordClass;
 use codex_trace_tui::TraceRenderRequest;
 use codex_trace_tui::TraceRowStyleRequest;
 use codex_trace_tui::TraceVisualRenderer;
+use insta::assert_debug_snapshot;
 use pretty_assertions::assert_eq;
+use ratatui::style::Color;
 use ratatui::style::Modifier;
 
 use super::CodexTraceVisualRenderer;
@@ -51,5 +53,44 @@ fn user_assistant_and_tool_rows_have_distinct_subtle_backgrounds() {
             row_background_rgb(TraceRecordClass::ToolOutput, terminal_background),
         ],
         [Some((30, 30, 30)), Some((17, 9, 22)), Some((3, 15, 18))]
+    );
+}
+
+#[test]
+fn oversized_json_line_does_not_disable_highlighting_for_safe_lines() {
+    let oversized = "x".repeat(crate::render::highlight::MAX_HIGHLIGHT_LINE_BYTES + 1);
+    let document = TraceContentDocument {
+        format: TraceContentFormat::Json,
+        text: format!("{{\n  \"safe\": true,\n  \"oversized\": \"{oversized}\"\n}}"),
+        truncated: false,
+    };
+
+    let lines = CodexTraceVisualRenderer::new().render_content(TraceRenderRequest {
+        document: &document,
+        width: 8_192,
+        cwd: None,
+    });
+
+    assert!(lines[1].spans.iter().any(|span| span.style.fg.is_some()));
+    assert!(
+        lines[2]
+            .spans
+            .iter()
+            .all(|span| span.style.fg.is_none() || span.style.fg == Some(Color::Reset))
+    );
+    assert!(lines[3].spans.iter().any(|span| span.style.fg.is_some()));
+    assert_debug_snapshot!(
+        lines
+            .iter()
+            .map(|line| line.spans.iter().any(|span| span.style.fg.is_some()))
+            .collect::<Vec<_>>(),
+        @r###"
+    [
+        true,
+        true,
+        false,
+        true,
+    ]
+    "###
     );
 }

@@ -1,0 +1,22 @@
+---
+source: trace-tui/src/phase5_tests.rs
+expression: "render_app(&mut app, 150, 18)"
+---
+ Codex Trace  read-only · offline │ thread 019d0000-0000-7000-8000-000000000201 / collapsed
+                                          KIND CLASS        STATUS    TIME                 SOURCE   EVIDENCE      PREVIEW
+▶◆t                                       user user         —         —                    persist… semantic      a long semantic preview a long seman
+ ◆t                                       user user         —         —                    persist… semantic      second event
+ ◆t                                       user user         —         —                    persist… semantic      third event
+
+
+
+
+
+
+
+
+
+
+
+
+3/4 visible · 1 hidden · 0 columns omitted  jk move  h/l horizontal  Enter descend  Tab lens  / search  ? help collapsed · rendered · nowrap · x 4/224

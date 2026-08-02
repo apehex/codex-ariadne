@@ -3,16 +3,16 @@ source: trace-tui/src/phase4_tests.rs
 expression: "render_app(&mut app, 88, 14)"
 ---
  Codex Trace  read-only · offline │ thread 019d0000-0000-7000-8000-000000000201 / collap
+first line
+second line
 
-┌ JSON value · /payload/message ───────────────────────────────────────────────────────┐
-│first line                                                                            │
-│second line                                                                           │
-│                                                                                      │
-│                                                                                      │
-│                                                                                      │
-│                                                                                      │
-│                                                                                      │
-│                                                                                      │
-│                                                                                      │
-└──────────────────────────────────────────────────────────────────────────────────────┘
- jk scroll  PgUp/PgDn page  Esc back  q quit
+
+
+
+
+
+
+
+
+
+jk scroll  h/l horizontal  Esc back  q quit        collapsed · rendered · nowrap · x 0/0

@@ -8,6 +8,7 @@ use codex_trace::GroupEvidenceCounts;
 use codex_trace::GroupId;
 use codex_trace::GroupKind;
 use codex_trace::PresentationScope;
+#[cfg(test)]
 use codex_trace::TraceNode;
 use codex_trace::TraceNodeLocator;
 use codex_trace::TraceObjectRef;
@@ -102,6 +103,7 @@ impl BrowserState {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn row_node<'a>(&'a self, row: &'a BrowserRow) -> Option<&'a TraceNode> {
         self.node_for_row(row)
     }

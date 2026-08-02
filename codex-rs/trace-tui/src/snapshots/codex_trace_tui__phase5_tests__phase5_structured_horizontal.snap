@@ -1,0 +1,16 @@
+---
+source: trace-tui/src/phase5_tests.rs
+expression: "render_app(&mut app, 70, 12)"
+---
+ Codex Trace  read-only · offline │ thread 019d0000-0000-7000-8000-000
+rizontal value structured horizontal value structured horizontal value
+
+
+
+
+
+
+
+
+
+jk h/l  Esc                collapsed · rendered · nowrap · x 1049/1049
